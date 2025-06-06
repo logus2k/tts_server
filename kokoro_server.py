@@ -343,7 +343,7 @@ async def generate_tts_for_sentence_binary_safe(sentence: str, voice: str, clien
             # Run TTS generation with timeout
             loop = asyncio.get_event_loop()
             generator = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: tts_pipeline(cleaned_sentence, voice=voice, speed=1.25)),
+                loop.run_in_executor(None, lambda: tts_pipeline(cleaned_sentence, voice=voice, speed=1.25)), # type: ignore
                 timeout=timeout_seconds
             )
         except asyncio.TimeoutError:
@@ -381,7 +381,7 @@ async def generate_tts_for_sentence_binary_safe(sentence: str, voice: str, clien
                 audio = None
                 
                 if hasattr(chunk_data, 'output') and hasattr(chunk_data.output, 'audio'):
-                    audio = chunk_data.output.audio
+                    audio = chunk_data.output.audio # type: ignore
                     logger.debug(f"Extracted audio from Result.output.audio: {type(audio)} {audio.shape}")
                 else:
                     logger.error(f"Could not find audio in expected location for chunk {i}")
@@ -500,7 +500,7 @@ async def generate_tts_for_sentence(sentence: str, voice: str, client_id: str) -
         
         # Run TTS generation in thread pool
         loop = asyncio.get_event_loop()
-        generator = await loop.run_in_executor(None, lambda: tts_pipeline(sentence, voice=voice, speed=1.25))
+        generator = await loop.run_in_executor(None, lambda: tts_pipeline(sentence, voice=voice, speed=1.25)) # type: ignore
         
         chunk_count = 0
         sentence_duration = 0
@@ -513,7 +513,7 @@ async def generate_tts_for_sentence(sentence: str, voice: str, client_id: str) -
                 
                 # Based on debug output: chunk_data.output.audio contains the torch.Tensor
                 if hasattr(chunk_data, 'output') and hasattr(chunk_data.output, 'audio'):
-                    audio = chunk_data.output.audio
+                    audio = chunk_data.output.audio # type: ignore
                     logger.debug(f"Extracted audio from Result.output.audio: {type(audio)} {audio.shape}")
                 else:
                     logger.error(f"Could not find audio in expected location for base64 chunk {i}")
@@ -731,21 +731,21 @@ async def tts_text_chunk(sid, data):
         logger.info(f"🎵 Audio mapping: {target_client_id} -> {audio_sid}")
         
         # Get or create sentence buffer for the target client
-        buffer = client_sentence_buffers.get(audio_sid)
+        buffer = client_sentence_buffers.get(audio_sid) # type: ignore
         if not buffer:
             buffer = SentenceBuffer(target_client_id)
-            client_sentence_buffers[audio_sid] = buffer
+            client_sentence_buffers[audio_sid] = buffer # type: ignore
             logger.info(f"🎵 Created sentence buffer for hybrid client: {target_client_id} -> {audio_sid}")
         
         # ENHANCED BUFFER DEBUGGING
         logger.info(f"🎵 Buffer before processing: '{buffer.buffer}' (length: {len(buffer.buffer)})")
         
         # Get TTS session settings including format preference
-        session = client_tts_sessions.get(audio_sid, {
+        session = client_tts_sessions.get(audio_sid, { # type: ignore
             'voice': 'af_heart',
             'enabled': True,
             'format': 'base64'  # Default fallback
-        })
+        }) # type: ignore
         
         if not session.get('enabled', True):
             logger.info(f"🎵 TTS disabled for client {target_client_id}")
@@ -965,14 +965,14 @@ async def tts_configure_client(sid, data):
         audio_sid = audio_client_mapping.get(client_id, client_id)
         
         # Update session for the audio connection
-        session = client_tts_sessions.get(audio_sid, {})
+        session = client_tts_sessions.get(audio_sid, {}) # type: ignore
         
         if 'voice' in data:
             session['voice'] = data['voice']
         if 'enabled' in data:
             session['enabled'] = data['enabled']
         
-        client_tts_sessions[audio_sid] = session
+        client_tts_sessions[audio_sid] = session # type: ignore
         
         logger.info(f"Configured TTS for client {client_id} (audio: {audio_sid}): {session}")
         
@@ -1117,7 +1117,7 @@ async def get_client_info():
                 "format": session.get("format"),
                 "connection_type": session.get("connection_type"),
                 "main_client_id": session.get("main_client_id"),
-                "connected_time": session.get("connected_time").isoformat() if session.get("connected_time") else None
+                "connected_time": session.get("connected_time").isoformat() if session.get("connected_time") else None # type: ignore
             }
             for sid, session in client_tts_sessions.items()
         },
