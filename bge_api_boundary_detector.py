@@ -739,7 +739,7 @@ async def load_flagembedding_settings(settings_path: str = "./data/configuration
         # Return default configuration
         return {
             "FlagEmbedding": {
-                "ServerAPIAddress": "http://localhost:8000",
+                "ServerAPIAddress": "http://flagembedding:8000",
                 "BatchSize": 8,
                 "Dimension": 1024,
                 "Debug": True
