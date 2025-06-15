@@ -8,4 +8,4 @@ EXPOSE 7700
 
 WORKDIR /tts_server
 
-CMD ["python", "kokoro_server.py"]
+CMD ["python", "tts_server.py"]
