@@ -23,6 +23,9 @@ from kokoro import KPipeline
 import uvicorn
 from contextlib import asynccontextmanager
 import urllib.parse
+import json
+from pathlib import Path
+
 
 # FlagEmbedding API Integration
 from bge_api_boundary_detector import APIStreamingSentenceBuffer, process_tts_with_api_bge
@@ -35,34 +38,33 @@ logger = logging.getLogger(__name__)
 tts_pipeline: Optional[KPipeline] = None
 flagembedding_settings = None
 
-async def initialize_flagembedding_settings():
-    """Initialize FlagEmbedding settings for API communication"""
+async def initialize_flagembedding_settings(settings: dict):
     global flagembedding_settings
-    
     flagembedding_settings = {
-        "FlagEmbedding": {
+        "FlagEmbedding": settings.get("FlagEmbedding", {
             "ServerAPIAddress": "http://localhost:8000",
             "BatchSize": 8,
             "Dimension": 1024,
             "Debug": False
-        }
+        })
     }
-    
+
     logger.info(f"FlagEmbedding configured: {flagembedding_settings['FlagEmbedding']['ServerAPIAddress']}")
-    
+
     try:
         from bge_api_boundary_detector import FlagEmbeddingAPIClient
         api_client = FlagEmbeddingAPIClient(flagembedding_settings)
         health_ok = await api_client.check_health()
         await api_client.close()
-        
+
         if health_ok:
             logger.info("✅ FlagEmbedding API available")
         else:
             logger.warning("⚠️ FlagEmbedding API unavailable - using traditional detection")
-            
+
     except Exception as e:
         logger.warning(f"FlagEmbedding API test failed: {e}")
+
 
 async def initialize_pipeline():
     """Initialize Kokoro TTS pipeline"""
@@ -610,30 +612,47 @@ async def health_check():
         "timestamp": datetime.now().isoformat()
     }
 
+
+def load_config(path: str = "/tts_server/data/configuration/tts.server.settings.json") -> dict:
+    config_file = Path(path)
+    if not config_file.exists():
+        logger.warning(f"⚠️ Config file {path} not found. Using defaults.")
+        return {}
+    
+    try:
+        with open(config_file, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"❌ Failed to load config: {e}")
+        return {}
+
+
+
 # Socket.IO ASGI app
 sio_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 async def main():
-    """Main function"""
-    await initialize_flagembedding_settings()
+    settings = load_config()  # 👈 Load the settings dict from JSON
+    await initialize_flagembedding_settings(settings)  # 👈 Pass it here
     asyncio.create_task(cleanup_stale_buffers())
-    
+
     config = uvicorn.Config(
         sio_asgi_app,
-        host="0.0.0.0",
-        port=7700,
-        log_level="info",
-        access_log=False,
-        reload=False
+        host=settings.get("host", "0.0.0.0"),
+        port=settings.get("port", 7700),
+        log_level=settings.get("log_level", "info"),
+        access_log=settings.get("access_log", False),
+        reload=settings.get("reload", False)
     )
-    
+
     server = uvicorn.Server(config)
     logger.info("🎵 Starting Minimal Kokoro TTS Server...")
-    logger.info("📡 Server: http://localhost:7700")
-    logger.info("🔌 Socket.IO: http://localhost:7700/socket.io/")
-    logger.info("💡 Health check: http://localhost:7700/health")
-    
+    logger.info(f"📡 Server: http://{config.host}:{config.port}")
+    logger.info(f"🔌 Socket.IO: http://{config.host}:{config.port}/socket.io/")
+    logger.info(f"💡 Health check: http://{config.host}:{config.port}/health")
+
     await server.serve()
+
 
 if __name__ == '__main__':
     try:
