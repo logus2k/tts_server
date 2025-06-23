@@ -184,7 +184,7 @@ async def generate_tts_binary(sentence: str, voice: str, client_id: str):
         
         loop = asyncio.get_event_loop()
         generator = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: tts_pipeline(cleaned_sentence, voice=voice, speed=1.25)),
+            loop.run_in_executor(None, lambda: tts_pipeline(cleaned_sentence, voice=voice, speed=1.25, split_pattern=r"\n+")),
             timeout=25.0
         )
         
