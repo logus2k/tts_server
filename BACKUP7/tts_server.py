@@ -25,6 +25,7 @@ import urllib.parse
 import json
 from pathlib import Path
 
+
 # FlagEmbedding API Integration
 from bge_api_boundary_detector import APIStreamingSentenceBuffer, process_tts_with_api_bge
 
@@ -33,96 +34,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Global variables
-tts_pipelines: Dict[str, Optional[KPipeline]] = {}
+tts_pipeline: Optional[KPipeline] = None
 flagembedding_settings = None
-
-# Voice-to-Language mapping (based on official Kokoro documentation)
-VOICE_LANGUAGE_MAP = {
-    # American English (lang_code='a') - 19 voices
-    'af_heart': 'a',        # 🚺❤️ Grade A
-    'af_alloy': 'a',        # 🚺 Grade C  
-    'af_aoede': 'a',        # 🚺 Grade C+
-    'af_bella': 'a',        # 🚺🔥 Grade A-
-    'af_jessica': 'a',      # 🚺 Grade D
-    'af_kore': 'a',         # 🚺 Grade C+
-    'af_nicole': 'a',       # 🚺🎧 Grade B-
-    'af_nova': 'a',         # 🚺 Grade C
-    'af_river': 'a',        # 🚺 Grade D
-    'af_sarah': 'a',        # 🚺 Grade C+
-    'af_sky': 'a',          # 🚺 Grade C-
-    'am_adam': 'a',         # 🚹 Grade F+
-    'am_echo': 'a',         # 🚹 Grade D
-    'am_eric': 'a',         # 🚹 Grade D
-    'am_fenrir': 'a',       # 🚹 Grade C+
-    'am_liam': 'a',         # 🚹 Grade D
-    'am_michael': 'a',      # 🚹 Grade C+
-    'am_onyx': 'a',         # 🚹 Grade D
-    'am_puck': 'a',         # 🚹 Grade C+
-    'am_santa': 'a',        # 🚹 Grade D-
-    
-    # British English (lang_code='b') - 8 voices
-    'bf_alice': 'b',        # 🚺 Grade D
-    'bf_emma': 'b',         # 🚺 Grade B-
-    'bf_isabella': 'b',     # 🚺 Grade C
-    'bf_lily': 'b',         # 🚺 Grade D
-    'bm_daniel': 'b',       # 🚹 Grade D
-    'bm_fable': 'b',        # 🚹 Grade C
-    'bm_george': 'b',       # 🚹 Grade C
-    'bm_lewis': 'b',        # 🚹 Grade D+
-    
-    # Japanese (lang_code='j') - 5 voices
-    'jf_alpha': 'j',        # 🚺 Grade C+
-    'jf_gongitsune': 'j',   # 🚺 Grade C
-    'jf_nezumi': 'j',       # 🚺 Grade C-
-    'jf_tebukuro': 'j',     # 🚺 Grade C
-    'jm_kumo': 'j',         # 🚹 Grade C-
-    
-    # Mandarin Chinese (lang_code='z') - 8 voices
-    'zf_xiaobei': 'z',      # 🚺 Grade D
-    'zf_xiaoni': 'z',       # 🚺 Grade D
-    'zf_xiaoxiao': 'z',     # 🚺 Grade D
-    'zf_xiaoyi': 'z',       # 🚺 Grade D
-    'zm_yunjian': 'z',      # 🚹 Grade D
-    'zm_yunxi': 'z',        # 🚹 Grade D
-    'zm_yunxia': 'z',       # 🚹 Grade D
-    'zm_yunyang': 'z',      # 🚹 Grade D
-    
-    # Spanish (lang_code='e') - 3 voices
-    'ef_dora': 'e',         # 🚺
-    'em_alex': 'e',         # 🚹
-    'em_santa': 'e',        # 🚹
-    
-    # French (lang_code='f') - 1 voice
-    'ff_siwis': 'f',        # 🚺 Grade B-
-    
-    # Hindi (lang_code='h') - 4 voices
-    'hf_alpha': 'h',        # 🚺 Grade C
-    'hf_beta': 'h',         # 🚺 Grade C
-    'hm_omega': 'h',        # 🚹 Grade C
-    'hm_psi': 'h',          # 🚹 Grade C
-    
-    # Italian (lang_code='i') - 2 voices
-    'if_sara': 'i',         # 🚺 Grade C
-    'im_nicola': 'i',       # 🚹 Grade C
-    
-    # Brazilian Portuguese (lang_code='p') - 3 voices
-    'pf_dora': 'p',         # 🚺
-    'pm_alex': 'p',         # 🚹
-    'pm_santa': 'p',        # 🚹
-}
-
-# Language code definitions (based on official Kokoro documentation)
-SUPPORTED_LANGUAGES = {
-    'a': 'American English',     # 19 voices
-    'b': 'British English',      # 8 voices  
-    'j': 'Japanese',             # 5 voices
-    'z': 'Mandarin Chinese',     # 8 voices
-    'e': 'Spanish',              # 3 voices
-    'f': 'French',               # 1 voice
-    'h': 'Hindi',                # 4 voices
-    'i': 'Italian',              # 2 voices
-    'p': 'Brazilian Portuguese', # 3 voices
-}
 
 async def initialize_flagembedding_settings(settings: dict):
     global flagembedding_settings
@@ -151,77 +64,32 @@ async def initialize_flagembedding_settings(settings: dict):
     except Exception as e:
         logger.warning(f"FlagEmbedding API test failed: {e}")
 
-async def initialize_pipeline_for_language(lang_code: str) -> Optional[KPipeline]:
-    """Initialize Kokoro TTS pipeline for specific language"""
+
+async def initialize_pipeline():
+    """Initialize Kokoro TTS pipeline"""
+    global tts_pipeline
     try:
-        logger.info(f"Initializing Kokoro TTS pipeline for language: {lang_code} ({SUPPORTED_LANGUAGES.get(lang_code, 'Unknown')})")
+        logger.info("Initializing Kokoro TTS pipeline...")
         loop = asyncio.get_event_loop()
-        pipeline = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: KPipeline(lang_code=lang_code)),
+        tts_pipeline = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: KPipeline(lang_code='a')),
             timeout=300.0
         )
-        logger.info(f"✅ TTS pipeline initialized for {lang_code}")
-        return pipeline
+        logger.info("✅ TTS pipeline initialized")
     except Exception as e:
-        logger.error(f"❌ TTS pipeline failed for {lang_code}: {e}")
-        return None
-
-async def initialize_all_pipelines():
-    """Initialize TTS pipelines for all supported languages"""
-    global tts_pipelines
-    
-    # Get unique language codes from voice mapping
-    required_languages = set(VOICE_LANGUAGE_MAP.values())
-    
-    logger.info(f"Initializing pipelines for languages: {list(required_languages)}")
-    
-    initialization_tasks = []
-    for lang_code in required_languages:
-        task = initialize_pipeline_for_language(lang_code)
-        initialization_tasks.append((lang_code, task))
-    
-    # Initialize pipelines concurrently
-    for lang_code, task in initialization_tasks:
-        try:
-            pipeline = await task
-            tts_pipelines[lang_code] = pipeline
-            if pipeline:
-                logger.info(f"✅ Pipeline ready: {lang_code} ({SUPPORTED_LANGUAGES.get(lang_code)})")
-            else:
-                logger.error(f"❌ Pipeline failed: {lang_code}")
-        except Exception as e:
-            logger.error(f"❌ Pipeline initialization error for {lang_code}: {e}")
-            tts_pipelines[lang_code] = None
-
-def get_pipeline_for_voice(voice: str) -> Optional[KPipeline]:
-    """Get the appropriate TTS pipeline for a given voice"""
-    lang_code = VOICE_LANGUAGE_MAP.get(voice)
-    if not lang_code:
-        logger.warning(f"⚠️ Unknown voice: {voice}, falling back to American English")
-        lang_code = 'a'
-    
-    pipeline = tts_pipelines.get(lang_code)
-    if not pipeline:
-        logger.warning(f"⚠️ Pipeline not available for {lang_code}, trying fallback")
-        # Try American English as fallback
-        pipeline = tts_pipelines.get('a')
-    
-    return pipeline
-
-def get_language_for_voice(voice: str) -> str:
-    """Get language code for a given voice"""
-    return VOICE_LANGUAGE_MAP.get(voice, 'a')
+        logger.error(f"❌ TTS pipeline failed: {e}")
+        tts_pipeline = None
+        raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     try:
-        await initialize_all_pipelines()
-        active_pipelines = sum(1 for p in tts_pipelines.values() if p is not None)
-        logger.info(f"✅ {active_pipelines}/{len(tts_pipelines)} TTS pipelines ready")
+        await initialize_pipeline()
+        logger.info("✅ TTS pipeline ready")
     except Exception as e:
         logger.error(f"❌ TTS initialization failed: {e}")
-        logger.warning("⚠️ TTS functionality may be limited")
+        logger.warning("⚠️ TTS functionality disabled")
     
     yield
     
@@ -242,8 +110,8 @@ sio = socketio.AsyncServer(
 
 # FastAPI app
 app = FastAPI(
-    title="Multi-Language Kokoro TTS Server",
-    version="2.0.0-multilang",
+    title="Minimal Kokoro TTS Server",
+    version="1.3.0-minimal",
     lifespan=lifespan
 )
 
@@ -293,19 +161,14 @@ def audio_to_wav_bytes(audio_data: np.ndarray, sample_rate: int = 24000) -> byte
         return b""
 
 async def generate_tts_binary(sentence: str, voice: str, client_id: str):
-    """Generate TTS audio in binary format with language-specific pipeline"""
+    """Generate TTS audio in binary format"""
     try:
-        pipeline = get_pipeline_for_voice(voice)
-        lang_code = get_language_for_voice(voice)
-        
-        if not pipeline:
+        if not tts_pipeline:
             error_data = {
                 'type': 'tts_error',
-                'error': f'TTS pipeline not available for voice {voice} (language: {lang_code})',
+                'error': 'TTS pipeline not initialized',
                 'sentence_text': sentence[:100],
                 'client_id': client_id,
-                'voice': voice,
-                'language': lang_code,
                 'format': 'binary',
                 'timestamp': datetime.now().isoformat()
             }
@@ -316,11 +179,11 @@ async def generate_tts_binary(sentence: str, voice: str, client_id: str):
             sentence = sentence[:180] + "..."
         
         cleaned_sentence = sentence.strip()
-        logger.info(f"🎵 Generating TTS: {cleaned_sentence[:50]}... (voice: {voice}, lang: {lang_code})")
+        logger.info(f"🎵 Generating TTS: {cleaned_sentence[:50]}...")
         
         loop = asyncio.get_event_loop()
         generator = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: pipeline(cleaned_sentence, voice=voice, speed=1.25, split_pattern=r"\n+")),
+            loop.run_in_executor(None, lambda: tts_pipeline(cleaned_sentence, voice=voice, speed=1.25, split_pattern=r"\n+")),
             timeout=25.0
         )
         
@@ -365,8 +228,6 @@ async def generate_tts_binary(sentence: str, voice: str, client_id: str):
                         'duration': chunk_duration,
                         'sentence_duration': total_duration,
                         'client_id': client_id,
-                        'voice': voice,
-                        'language': lang_code,
                         'format': 'binary',
                         'timestamp': datetime.now().isoformat()
                     }
@@ -386,13 +247,11 @@ async def generate_tts_binary(sentence: str, voice: str, client_id: str):
             'total_chunks': chunk_count,
             'total_duration': total_duration,
             'client_id': client_id,
-            'voice': voice,
-            'language': lang_code,
             'format': 'binary',
             'timestamp': datetime.now().isoformat()
         }
         
-        logger.info(f"🎵 TTS completed: {chunk_count} chunks, {total_duration:.2f}s (voice: {voice}, lang: {lang_code})")
+        logger.info(f"🎵 TTS completed: {chunk_count} chunks, {total_duration:.2f}s")
         yield completion, None
         
     except Exception as e:
@@ -402,36 +261,29 @@ async def generate_tts_binary(sentence: str, voice: str, client_id: str):
             'error': str(e),
             'sentence_text': sentence,
             'client_id': client_id,
-            'voice': voice,
-            'language': get_language_for_voice(voice),
             'format': 'binary',
             'timestamp': datetime.now().isoformat()
         }
         yield error_data, None
 
 async def generate_tts_base64(sentence: str, voice: str, client_id: str) -> AsyncGenerator[dict, None]:
-    """Generate TTS audio in base64 format with language-specific pipeline"""
+    """Generate TTS audio in base64 format"""
     try:
-        pipeline = get_pipeline_for_voice(voice)
-        lang_code = get_language_for_voice(voice)
-        
-        if not pipeline:
+        if not tts_pipeline:
             yield {
                 'type': 'tts_error',
-                'error': f'TTS pipeline not available for voice {voice} (language: {lang_code})',
+                'error': 'TTS pipeline not initialized',
                 'sentence_text': sentence,
                 'client_id': client_id,
-                'voice': voice,
-                'language': lang_code,
                 'format': 'base64',
                 'timestamp': datetime.now().isoformat()
             }
             return
         
-        logger.info(f"Generating base64 TTS: {sentence[:50]}... (voice: {voice}, lang: {lang_code})")
+        logger.info(f"Generating base64 TTS: {sentence[:50]}...")
         
         loop = asyncio.get_event_loop()
-        generator = await loop.run_in_executor(None, lambda: pipeline(sentence, voice=voice, speed=1.25))
+        generator = await loop.run_in_executor(None, lambda: tts_pipeline(sentence, voice=voice, speed=1.25))
         
         chunk_count = 0
         total_duration = 0
@@ -467,8 +319,6 @@ async def generate_tts_base64(sentence: str, voice: str, client_id: str) -> Asyn
                             'duration': chunk_duration,
                             'sentence_duration': total_duration,
                             'client_id': client_id,
-                            'voice': voice,
-                            'language': lang_code,
                             'format': 'base64',
                             'timestamp': datetime.now().isoformat()
                         }
@@ -487,8 +337,6 @@ async def generate_tts_base64(sentence: str, voice: str, client_id: str) -> Asyn
             'total_chunks': chunk_count,
             'total_duration': total_duration,
             'client_id': client_id,
-            'voice': voice,
-            'language': lang_code,
             'format': 'base64',
             'timestamp': datetime.now().isoformat()
         }
@@ -500,8 +348,6 @@ async def generate_tts_base64(sentence: str, voice: str, client_id: str) -> Asyn
             'error': str(e),
             'sentence_text': sentence,
             'client_id': client_id,
-            'voice': voice,
-            'language': get_language_for_voice(voice),
             'format': 'base64',
             'timestamp': datetime.now().isoformat()
         }
@@ -534,15 +380,12 @@ async def connect(sid, environ):
         'connection_type': connection_type
     }
     
-    # Send confirmation with language info
-    active_languages = [lang for lang, pipeline in tts_pipelines.items() if pipeline is not None]
+    # Send confirmation
     await sio.emit('tts_connected', {
-        'status': 'Connected to Multi-Language TTS server',
+        'status': 'Connected to TTS server',
         'client_id': sid,
         'format': format_type,
-        'version': '2.0.0-multilang',
-        'supported_languages': active_languages,
-        'language_names': {lang: SUPPORTED_LANGUAGES.get(lang, 'Unknown') for lang in active_languages},
+        'version': '1.3.0-minimal',
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
@@ -618,11 +461,10 @@ async def tts_text_chunk(sid, data):
         
         voice = session.get('voice', 'af_heart')
         format_type = session.get('format', 'base64')
-        lang_code = get_language_for_voice(voice)
         
         # TTS generation callback
         async def tts_generation_callback(sentence: str, client_id: str, analysis: dict):
-            logger.info(f"🎵 TTS: {sentence[:40]}... (voice: {voice}, lang: {lang_code}, method: {analysis['method']}, confidence: {analysis['confidence']:.3f})")
+            logger.info(f"🎵 TTS: {sentence[:40]}... (method: {analysis['method']}, confidence: {analysis['confidence']:.3f})")
             
             # Generate and stream
             if format_type == 'binary':
@@ -663,24 +505,11 @@ async def tts_text_chunk(sid, data):
 
 @sio.event
 async def tts_configure(sid, data):
-    """Configure TTS settings with voice validation"""
+    """Configure TTS settings"""
     session = client_tts_sessions.get(sid, {})
     
     if 'voice' in data:
-        new_voice = data['voice']
-        if new_voice in VOICE_LANGUAGE_MAP:
-            lang_code = get_language_for_voice(new_voice)
-            pipeline = get_pipeline_for_voice(new_voice)
-            
-            if pipeline:
-                session['voice'] = new_voice
-                logger.info(f"Voice set to {new_voice} (language: {lang_code}) for client {sid}")
-            else:
-                logger.warning(f"Pipeline not available for voice {new_voice} (language: {lang_code})")
-                # Don't change voice if pipeline unavailable
-        else:
-            logger.warning(f"Unknown voice: {new_voice}")
-    
+        session['voice'] = data['voice']
     if 'enabled' in data:
         session['enabled'] = data['enabled']
     
@@ -688,36 +517,21 @@ async def tts_configure(sid, data):
     
     await sio.emit('tts_configured', {
         'voice': session.get('voice'),
-        'language': get_language_for_voice(session.get('voice', 'af_heart')),
-        'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(session.get('voice', 'af_heart')), 'Unknown'),
         'enabled': session.get('enabled'),
         'format': session.get('format'),
-        'pipeline_available': get_pipeline_for_voice(session.get('voice', 'af_heart')) is not None,
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
 @sio.event
 async def tts_configure_client(sid, data):
-    """Configure TTS for relay client with voice validation"""
+    """Configure TTS for relay client"""
     client_id = data.get('client_id')
     audio_sid = audio_client_mapping.get(client_id, client_id)
     
     session = client_tts_sessions.get(audio_sid, {})
     
     if 'voice' in data:
-        new_voice = data['voice']
-        if new_voice in VOICE_LANGUAGE_MAP:
-            lang_code = get_language_for_voice(new_voice)
-            pipeline = get_pipeline_for_voice(new_voice)
-            
-            if pipeline:
-                session['voice'] = new_voice
-                logger.info(f"Voice set to {new_voice} (language: {lang_code}) for client {client_id}")
-            else:
-                logger.warning(f"Pipeline not available for voice {new_voice} (language: {lang_code})")
-        else:
-            logger.warning(f"Unknown voice: {new_voice}")
-    
+        session['voice'] = data['voice']
     if 'enabled' in data:
         session['enabled'] = data['enabled']
     
@@ -726,68 +540,20 @@ async def tts_configure_client(sid, data):
     await sio.emit('tts_client_configured', {
         'client_id': client_id,
         'voice': session.get('voice'),
-        'language': get_language_for_voice(session.get('voice', 'af_heart')),
-        'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(session.get('voice', 'af_heart')), 'Unknown'),
         'enabled': session.get('enabled'),
-        'pipeline_available': get_pipeline_for_voice(session.get('voice', 'af_heart')) is not None,
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
 @sio.event
 async def tts_get_voices(sid, data):
-    """Get available voices with language information"""
-    voices_with_languages = []
-    
-    for voice, lang_code in VOICE_LANGUAGE_MAP.items():
-        pipeline = get_pipeline_for_voice(voice)
-        voices_with_languages.append({
-            'voice': voice,
-            'language_code': lang_code,
-            'language_name': SUPPORTED_LANGUAGES.get(lang_code, 'Unknown'),
-            'available': pipeline is not None
-        })
-    
-    # Group by language
-    languages = {}
-    for voice_info in voices_with_languages:
-        lang_code = voice_info['language_code']
-        if lang_code not in languages:
-            languages[lang_code] = {
-                'code': lang_code,
-                'name': voice_info['language_name'],
-                'voices': []
-            }
-        languages[lang_code]['voices'].append(voice_info)
+    """Get available voices"""
+    voices = [
+        'af_heart', 'af_sky', 'af_bella', 'af_sarah',
+        'am_adam', 'am_michael', 'bf_emma', 'bf_isabella'
+    ]
     
     await sio.emit('tts_voices_response', {
-        'voices': list(VOICE_LANGUAGE_MAP.keys()),
-        'voices_detailed': voices_with_languages,
-        'languages': languages,
-        'requesting_client': data.get('requesting_client'),
-        'timestamp': datetime.now().isoformat()
-    }, room=sid)
-
-@sio.event
-async def tts_get_languages(sid, data):
-    """Get supported languages and their status"""
-    language_status = []
-    
-    for lang_code, lang_name in SUPPORTED_LANGUAGES.items():
-        pipeline = tts_pipelines.get(lang_code)
-        voices = [voice for voice, voice_lang in VOICE_LANGUAGE_MAP.items() if voice_lang == lang_code]
-        
-        language_status.append({
-            'code': lang_code,
-            'name': lang_name,
-            'available': pipeline is not None,
-            'voices': voices,
-            'voice_count': len(voices)
-        })
-    
-    await sio.emit('tts_languages_response', {
-        'languages': language_status,
-        'total_languages': len(SUPPORTED_LANGUAGES),
-        'active_languages': sum(1 for p in tts_pipelines.values() if p is not None),
+        'voices': voices,
         'requesting_client': data.get('requesting_client'),
         'timestamp': datetime.now().isoformat()
     }, room=sid)
@@ -834,71 +600,17 @@ async def cleanup_stale_buffers():
         
         await asyncio.sleep(20)
 
-# Health check with language status
+# Basic health check
 @app.get("/health")
 async def health_check():
-    pipeline_status = {}
-    for lang_code, pipeline in tts_pipelines.items():
-        pipeline_status[lang_code] = {
-            'available': pipeline is not None,
-            'language_name': SUPPORTED_LANGUAGES.get(lang_code, 'Unknown'),
-            'voice_count': len([v for v, l in VOICE_LANGUAGE_MAP.items() if l == lang_code])
-        }
-    
     return {
         "status": "healthy",
-        "version": "2.0.0-multilang",
-        "pipelines": pipeline_status,
-        "total_languages": len(SUPPORTED_LANGUAGES),
-        "active_pipelines": sum(1 for p in tts_pipelines.values() if p is not None),
+        "version": "1.3.0-minimal",
+        "pipeline_ready": tts_pipeline is not None,
         "active_clients": len(client_sentence_buffers),
-        "supported_voices": len(VOICE_LANGUAGE_MAP),
         "timestamp": datetime.now().isoformat()
     }
 
-@app.get("/languages")
-async def get_languages():
-    """REST endpoint for language information"""
-    language_info = []
-    for lang_code, lang_name in SUPPORTED_LANGUAGES.items():
-        pipeline = tts_pipelines.get(lang_code)
-        voices = [voice for voice, voice_lang in VOICE_LANGUAGE_MAP.items() if voice_lang == lang_code]
-        
-        language_info.append({
-            'code': lang_code,
-            'name': lang_name,
-            'available': pipeline is not None,
-            'voices': voices,
-            'voice_count': len(voices)
-        })
-    
-    return {
-        "languages": language_info,
-        "total_languages": len(SUPPORTED_LANGUAGES),
-        "active_languages": sum(1 for p in tts_pipelines.values() if p is not None),
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/voices")
-async def get_voices():
-    """REST endpoint for voice information"""
-    voices_with_languages = []
-    
-    for voice, lang_code in VOICE_LANGUAGE_MAP.items():
-        pipeline = get_pipeline_for_voice(voice)
-        voices_with_languages.append({
-            'voice': voice,
-            'language_code': lang_code,
-            'language_name': SUPPORTED_LANGUAGES.get(lang_code, 'Unknown'),
-            'available': pipeline is not None
-        })
-    
-    return {
-        "voices": voices_with_languages,
-        "total_voices": len(VOICE_LANGUAGE_MAP),
-        "available_voices": sum(1 for v in voices_with_languages if v['available']),
-        "timestamp": datetime.now().isoformat()
-    }
 
 def load_config(path: str = "/tts_server/data/configuration/tts.server.settings.json") -> dict:
     config_file = Path(path)
@@ -913,12 +625,14 @@ def load_config(path: str = "/tts_server/data/configuration/tts.server.settings.
         logger.error(f"❌ Failed to load config: {e}")
         return {}
 
+
+
 # Socket.IO ASGI app
 sio_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app)
 
 async def main():
-    settings = load_config()
-    await initialize_flagembedding_settings(settings)
+    settings = load_config()  # 👈 Load the settings dict from JSON
+    await initialize_flagembedding_settings(settings)  # 👈 Pass it here
     asyncio.create_task(cleanup_stale_buffers())
 
     config = uvicorn.Config(
@@ -931,18 +645,13 @@ async def main():
     )
 
     server = uvicorn.Server(config)
-    logger.info("🌍 Starting Multi-Language Kokoro TTS Server...")
+    logger.info("🎵 Starting Minimal Kokoro TTS Server...")
     logger.info(f"📡 Server: http://{config.host}:{config.port}")
     logger.info(f"🔌 Socket.IO: http://{config.host}:{config.port}/socket.io/")
     logger.info(f"💡 Health check: http://{config.host}:{config.port}/health")
-    logger.info(f"🌐 Languages: http://{config.host}:{config.port}/languages")
-    logger.info(f"🎤 Voices: http://{config.host}:{config.port}/voices")
-    
-    # Log supported languages
-    supported_langs = ", ".join([f"{code} ({name})" for code, name in SUPPORTED_LANGUAGES.items()])
-    logger.info(f"🗣️ Supported languages: {supported_langs}")
 
     await server.serve()
+
 
 if __name__ == '__main__':
     try:
