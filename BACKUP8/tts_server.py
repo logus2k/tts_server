@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 
 """
-Kokoro TTS Server with FlagEmbedding API Integration
+Minimal Kokoro TTS Server with FlagEmbedding API Integration
 """
 
 """
 pip install kokoro==0.9.4 fastapi uvicorn python-socketio soundfile numpy torch aiohttp
 """
-
 
 import asyncio
 import base64
@@ -26,7 +25,6 @@ import urllib.parse
 import json
 from pathlib import Path
 
-
 # FlagEmbedding API Integration
 from bge_api_boundary_detector import APIStreamingSentenceBuffer, process_tts_with_api_bge
 
@@ -37,7 +35,6 @@ logger = logging.getLogger(__name__)
 # Global variables
 tts_pipelines: Dict[str, Optional[KPipeline]] = {}
 flagembedding_settings = None
-tts_settings = None
 
 # Voice-to-Language mapping (based on official Kokoro documentation)
 VOICE_LANGUAGE_MAP = {
@@ -154,70 +151,14 @@ async def initialize_flagembedding_settings(settings: dict):
     except Exception as e:
         logger.warning(f"FlagEmbedding API test failed: {e}")
 
-async def initialize_tts_settings(settings: dict):
-    global tts_settings
-    tts_settings = settings.get("TTS", {
-        "default_voice": "af_heart",
-        "default_speed": 1.20,
-        "enabled_languages": ["a", "b", "j", "z", "e", "f", "h", "i", "p"],
-        "pipeline_timeout": 300,
-        "max_sentence_length": 180,
-        "chunk_limit": 40,
-        "chunk_timeout": 3.0,
-        "generation_timeout": 25.0,
-        "speed_min": 0.5,
-        "speed_max": 2.0
-    })
-    
-    logger.info(f"TTS Settings loaded:")
-    logger.info(f"  Default voice: {tts_settings['default_voice']}")
-    logger.info(f"  Default speed: {tts_settings['default_speed']}")
-    logger.info(f"  Enabled languages: {tts_settings['enabled_languages']}")
-    logger.info(f"  Pipeline timeout: {tts_settings['pipeline_timeout']}s")
-    logger.info(f"  Max sentence length: {tts_settings['max_sentence_length']} chars")
-
-def get_enabled_languages():
-    """Get list of enabled languages from settings"""
-    if not tts_settings:
-        return list(SUPPORTED_LANGUAGES.keys())
-    return tts_settings.get('enabled_languages', list(SUPPORTED_LANGUAGES.keys()))
-
-def get_default_voice():
-    """Get default voice from settings"""
-    if not tts_settings:
-        return 'af_heart'
-    return tts_settings.get('default_voice', 'af_heart')
-
-def get_default_speed():
-    """Get default speed from settings"""
-    if not tts_settings:
-        return 1.20
-    return tts_settings.get('default_speed', 1.20)
-
-def validate_speed(speed: float) -> float:
-    """Validate and clamp speed within allowed range"""
-    if not tts_settings:
-        return max(0.5, min(2.0, speed))
-    
-    speed_min = tts_settings.get('speed_min', 0.5)
-    speed_max = tts_settings.get('speed_max', 2.0)
-    return max(speed_min, min(speed_max, speed))
-
 async def initialize_pipeline_for_language(lang_code: str) -> Optional[KPipeline]:
     """Initialize Kokoro TTS pipeline for specific language"""
     try:
-        enabled_languages = get_enabled_languages()
-        if lang_code not in enabled_languages:
-            logger.info(f"⏭️ Skipping {lang_code} - not enabled in settings")
-            return None
-            
         logger.info(f"Initializing Kokoro TTS pipeline for language: {lang_code} ({SUPPORTED_LANGUAGES.get(lang_code, 'Unknown')})")
         loop = asyncio.get_event_loop()
-        timeout = tts_settings.get('pipeline_timeout', 300) if tts_settings else 300
-        
         pipeline = await asyncio.wait_for(
             loop.run_in_executor(None, lambda: KPipeline(lang_code=lang_code)),
-            timeout=timeout
+            timeout=300.0
         )
         logger.info(f"✅ TTS pipeline initialized for {lang_code}")
         return pipeline
@@ -226,14 +167,13 @@ async def initialize_pipeline_for_language(lang_code: str) -> Optional[KPipeline
         return None
 
 async def initialize_all_pipelines():
-    """Initialize TTS pipelines for all enabled languages"""
+    """Initialize TTS pipelines for all supported languages"""
     global tts_pipelines
     
-    # Get unique language codes from voice mapping, filtered by enabled languages
-    enabled_languages = get_enabled_languages()
-    required_languages = set(lang for lang in VOICE_LANGUAGE_MAP.values() if lang in enabled_languages)
+    # Get unique language codes from voice mapping
+    required_languages = set(VOICE_LANGUAGE_MAP.values())
     
-    logger.info(f"Initializing pipelines for enabled languages: {list(required_languages)}")
+    logger.info(f"Initializing pipelines for languages: {list(required_languages)}")
     
     initialization_tasks = []
     for lang_code in required_languages:
@@ -248,7 +188,7 @@ async def initialize_all_pipelines():
             if pipeline:
                 logger.info(f"✅ Pipeline ready: {lang_code} ({SUPPORTED_LANGUAGES.get(lang_code)})")
             else:
-                logger.info(f"⏭️ Pipeline skipped: {lang_code}")
+                logger.error(f"❌ Pipeline failed: {lang_code}")
         except Exception as e:
             logger.error(f"❌ Pipeline initialization error for {lang_code}: {e}")
             tts_pipelines[lang_code] = None
@@ -257,9 +197,8 @@ def get_pipeline_for_voice(voice: str) -> Optional[KPipeline]:
     """Get the appropriate TTS pipeline for a given voice"""
     lang_code = VOICE_LANGUAGE_MAP.get(voice)
     if not lang_code:
-        logger.warning(f"⚠️ Unknown voice: {voice}, falling back to default")
-        default_voice = get_default_voice()
-        lang_code = VOICE_LANGUAGE_MAP.get(default_voice, 'a')
+        logger.warning(f"⚠️ Unknown voice: {voice}, falling back to American English")
+        lang_code = 'a'
     
     pipeline = tts_pipelines.get(lang_code)
     if not pipeline:
@@ -273,20 +212,13 @@ def get_language_for_voice(voice: str) -> str:
     """Get language code for a given voice"""
     return VOICE_LANGUAGE_MAP.get(voice, 'a')
 
-def is_voice_enabled(voice: str) -> bool:
-    """Check if voice is enabled (its language is enabled)"""
-    lang_code = get_language_for_voice(voice)
-    enabled_languages = get_enabled_languages()
-    return lang_code in enabled_languages
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     try:
         await initialize_all_pipelines()
         active_pipelines = sum(1 for p in tts_pipelines.values() if p is not None)
-        total_enabled = len(get_enabled_languages())
-        logger.info(f"✅ {active_pipelines}/{total_enabled} TTS pipelines ready")
+        logger.info(f"✅ {active_pipelines}/{len(tts_pipelines)} TTS pipelines ready")
     except Exception as e:
         logger.error(f"❌ TTS initialization failed: {e}")
         logger.warning("⚠️ TTS functionality may be limited")
@@ -311,7 +243,7 @@ sio = socketio.AsyncServer(
 # FastAPI app
 app = FastAPI(
     title="Multi-Language Kokoro TTS Server",
-    version="2.1.0-settings",
+    version="2.0.0-multilang",
     lifespan=lifespan
 )
 
@@ -360,8 +292,8 @@ def audio_to_wav_bytes(audio_data: np.ndarray, sample_rate: int = 24000) -> byte
         logger.error(f"WAV conversion error: {e}")
         return b""
 
-async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id: str):
-    """Generate TTS audio in binary format with language-specific pipeline and dynamic speed"""
+async def generate_tts_binary(sentence: str, voice: str, client_id: str):
+    """Generate TTS audio in binary format with language-specific pipeline"""
     try:
         pipeline = get_pipeline_for_voice(voice)
         lang_code = get_language_for_voice(voice)
@@ -374,41 +306,29 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
                 'client_id': client_id,
                 'voice': voice,
                 'language': lang_code,
-                'speed': speed,
                 'format': 'binary',
                 'timestamp': datetime.now().isoformat()
             }
             yield error_data, None
             return
         
-        # Apply sentence length limit from settings
-        max_length = tts_settings.get('max_sentence_length', 180) if tts_settings else 180
-        if len(sentence) > max_length:
-            sentence = sentence[:max_length] + "..."
-        
-        # Validate speed
-        validated_speed = validate_speed(speed)
-        if validated_speed != speed:
-            logger.warning(f"Speed {speed} clamped to {validated_speed}")
+        if len(sentence) > 180:
+            sentence = sentence[:180] + "..."
         
         cleaned_sentence = sentence.strip()
-        logger.info(f"🎵 Generating TTS: {cleaned_sentence[:50]}... (voice: {voice}, lang: {lang_code}, speed: {validated_speed})")
+        logger.info(f"🎵 Generating TTS: {cleaned_sentence[:50]}... (voice: {voice}, lang: {lang_code})")
         
         loop = asyncio.get_event_loop()
-        generation_timeout = tts_settings.get('generation_timeout', 25.0) if tts_settings else 25.0
-        
         generator = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: pipeline(cleaned_sentence, voice=voice, speed=validated_speed, split_pattern=r"\n+")),
-            timeout=generation_timeout
+            loop.run_in_executor(None, lambda: pipeline(cleaned_sentence, voice=voice, speed=1.20, split_pattern=r"\n+")),
+            timeout=25.0
         )
         
         chunk_count = 0
         total_duration = 0
-        chunk_limit = tts_settings.get('chunk_limit', 40) if tts_settings else 40
-        chunk_timeout = tts_settings.get('chunk_timeout', 3.0) if tts_settings else 3.0
         
         for i, chunk_data in enumerate(generator):
-            if i >= chunk_limit:  # Limit chunks
+            if i >= 40:  # Limit chunks
                 break
                 
             try:
@@ -428,7 +348,7 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
                     
                     wav_bytes = await asyncio.wait_for(
                         loop.run_in_executor(None, audio_to_wav_bytes, audio_np, 24000),
-                        timeout=chunk_timeout
+                        timeout=3.0
                     )
                     
                     if not wav_bytes:
@@ -447,7 +367,6 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
                         'client_id': client_id,
                         'voice': voice,
                         'language': lang_code,
-                        'speed': validated_speed,
                         'format': 'binary',
                         'timestamp': datetime.now().isoformat()
                     }
@@ -469,12 +388,11 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
             'client_id': client_id,
             'voice': voice,
             'language': lang_code,
-            'speed': validated_speed,
             'format': 'binary',
             'timestamp': datetime.now().isoformat()
         }
         
-        logger.info(f"🎵 TTS completed: {chunk_count} chunks, {total_duration:.2f}s (voice: {voice}, lang: {lang_code}, speed: {validated_speed})")
+        logger.info(f"🎵 TTS completed: {chunk_count} chunks, {total_duration:.2f}s (voice: {voice}, lang: {lang_code})")
         yield completion, None
         
     except Exception as e:
@@ -486,14 +404,13 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
             'client_id': client_id,
             'voice': voice,
             'language': get_language_for_voice(voice),
-            'speed': speed,
             'format': 'binary',
             'timestamp': datetime.now().isoformat()
         }
         yield error_data, None
 
-async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id: str) -> AsyncGenerator[dict, None]:
-    """Generate TTS audio in base64 format with language-specific pipeline and dynamic speed"""
+async def generate_tts_base64(sentence: str, voice: str, client_id: str) -> AsyncGenerator[dict, None]:
+    """Generate TTS audio in base64 format with language-specific pipeline"""
     try:
         pipeline = get_pipeline_for_voice(voice)
         lang_code = get_language_for_voice(voice)
@@ -506,41 +423,20 @@ async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id
                 'client_id': client_id,
                 'voice': voice,
                 'language': lang_code,
-                'speed': speed,
                 'format': 'base64',
                 'timestamp': datetime.now().isoformat()
             }
             return
         
-        # Apply sentence length limit from settings
-        max_length = tts_settings.get('max_sentence_length', 180) if tts_settings else 180
-        if len(sentence) > max_length:
-            sentence = sentence[:max_length] + "..."
-        
-        # Validate speed
-        validated_speed = validate_speed(speed)
-        if validated_speed != speed:
-            logger.warning(f"Speed {speed} clamped to {validated_speed}")
-        
-        logger.info(f"Generating base64 TTS: {sentence[:50]}... (voice: {voice}, lang: {lang_code}, speed: {validated_speed})")
+        logger.info(f"Generating base64 TTS: {sentence[:50]}... (voice: {voice}, lang: {lang_code})")
         
         loop = asyncio.get_event_loop()
-        generation_timeout = tts_settings.get('generation_timeout', 25.0) if tts_settings else 25.0
-        
-        generator = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: pipeline(sentence, voice=voice, speed=validated_speed)),
-            timeout=generation_timeout
-        )
+        generator = await loop.run_in_executor(None, lambda: pipeline(sentence, voice=voice, speed=1.25))
         
         chunk_count = 0
         total_duration = 0
-        chunk_limit = tts_settings.get('chunk_limit', 40) if tts_settings else 40
-        chunk_timeout = tts_settings.get('chunk_timeout', 3.0) if tts_settings else 3.0
         
         for i, chunk_data in enumerate(generator):
-            if i >= chunk_limit:
-                break
-                
             try:
                 if hasattr(chunk_data, 'output') and hasattr(chunk_data.output, 'audio'):
                     audio = chunk_data.output.audio
@@ -556,10 +452,7 @@ async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id
                     if len(audio_np) == 0:
                         continue
                     
-                    audio_b64 = await asyncio.wait_for(
-                        loop.run_in_executor(None, audio_to_base64, audio_np),
-                        timeout=chunk_timeout
-                    )
+                    audio_b64 = await loop.run_in_executor(None, audio_to_base64, audio_np)
                     
                     if audio_b64:
                         chunk_duration = len(audio_np) / 24000
@@ -576,7 +469,6 @@ async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id
                             'client_id': client_id,
                             'voice': voice,
                             'language': lang_code,
-                            'speed': validated_speed,
                             'format': 'base64',
                             'timestamp': datetime.now().isoformat()
                         }
@@ -597,7 +489,6 @@ async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id
             'client_id': client_id,
             'voice': voice,
             'language': lang_code,
-            'speed': validated_speed,
             'format': 'base64',
             'timestamp': datetime.now().isoformat()
         }
@@ -611,7 +502,6 @@ async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id
             'client_id': client_id,
             'voice': voice,
             'language': get_language_for_voice(voice),
-            'speed': speed,
             'format': 'base64',
             'timestamp': datetime.now().isoformat()
         }
@@ -633,14 +523,10 @@ async def connect(sid, environ):
     
     logger.info(f"🎵 Client connected: {sid} (type: {connection_type}, format: {format_type})")
     
-    # Initialize client with default settings
-    default_voice = get_default_voice()
-    default_speed = get_default_speed()
-    
+    # Initialize client
     client_sentence_buffers[sid] = APIStreamingSentenceBuffer(sid, flagembedding_settings)
     client_tts_sessions[sid] = {
-        'voice': default_voice,
-        'speed': default_speed,
+        'voice': 'af_heart',
         'enabled': True,
         'format': format_type,
         'connected_time': datetime.now(),
@@ -648,21 +534,15 @@ async def connect(sid, environ):
         'connection_type': connection_type
     }
     
-    # Send confirmation with language and settings info
+    # Send confirmation with language info
     active_languages = [lang for lang, pipeline in tts_pipelines.items() if pipeline is not None]
     await sio.emit('tts_connected', {
         'status': 'Connected to Multi-Language TTS server',
         'client_id': sid,
         'format': format_type,
-        'version': '2.1.0-settings',
-        'default_voice': default_voice,
-        'default_speed': default_speed,
+        'version': '2.0.0-multilang',
         'supported_languages': active_languages,
         'language_names': {lang: SUPPORTED_LANGUAGES.get(lang, 'Unknown') for lang in active_languages},
-        'speed_range': {
-            'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            'max': tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
@@ -728,8 +608,7 @@ async def tts_text_chunk(sid, data):
         
         # Get session settings
         session = client_tts_sessions.get(audio_sid, {
-            'voice': get_default_voice(),
-            'speed': get_default_speed(),
+            'voice': 'af_heart',
             'enabled': True,
             'format': 'base64'
         })
@@ -737,23 +616,17 @@ async def tts_text_chunk(sid, data):
         if not session.get('enabled', True):
             return
         
-        voice = session.get('voice', get_default_voice())
-        speed = session.get('speed', get_default_speed())
+        voice = session.get('voice', 'af_heart')
         format_type = session.get('format', 'base64')
         lang_code = get_language_for_voice(voice)
         
-        # Check if voice is enabled
-        if not is_voice_enabled(voice):
-            logger.warning(f"Voice {voice} not enabled (language {lang_code} not in enabled languages)")
-            return
-        
         # TTS generation callback
         async def tts_generation_callback(sentence: str, client_id: str, analysis: dict):
-            logger.info(f"🎵 TTS: {sentence[:40]}... (voice: {voice}, lang: {lang_code}, speed: {speed}, method: {analysis['method']}, confidence: {analysis['confidence']:.3f})")
+            logger.info(f"🎵 TTS: {sentence[:40]}... (voice: {voice}, lang: {lang_code}, method: {analysis['method']}, confidence: {analysis['confidence']:.3f})")
             
             # Generate and stream
             if format_type == 'binary':
-                async for metadata, binary_data in generate_tts_binary(sentence, voice, speed, client_id):
+                async for metadata, binary_data in generate_tts_binary(sentence, voice, client_id):
                     if binary_data is not None:
                         metadata_with_binary = metadata.copy()
                         metadata_with_binary['audio_data'] = binary_data
@@ -761,7 +634,7 @@ async def tts_text_chunk(sid, data):
                     else:
                         await sio.emit('tts_sentence_complete', metadata, room=audio_sid)
             else:
-                async for chunk_data in generate_tts_base64(sentence, voice, speed, client_id):
+                async for chunk_data in generate_tts_base64(sentence, voice, client_id):
                     await sio.emit('tts_audio_chunk', chunk_data, room=audio_sid)
         
         # Process with BGE-M3
@@ -790,62 +663,42 @@ async def tts_text_chunk(sid, data):
 
 @sio.event
 async def tts_configure(sid, data):
-    """Configure TTS settings with voice and speed validation"""
+    """Configure TTS settings with voice validation"""
     session = client_tts_sessions.get(sid, {})
     
     if 'voice' in data:
         new_voice = data['voice']
         if new_voice in VOICE_LANGUAGE_MAP:
-            if is_voice_enabled(new_voice):
-                lang_code = get_language_for_voice(new_voice)
-                pipeline = get_pipeline_for_voice(new_voice)
-                
-                if pipeline:
-                    session['voice'] = new_voice
-                    logger.info(f"Voice set to {new_voice} (language: {lang_code}) for client {sid}")
-                else:
-                    logger.warning(f"Pipeline not available for voice {new_voice} (language: {lang_code})")
+            lang_code = get_language_for_voice(new_voice)
+            pipeline = get_pipeline_for_voice(new_voice)
+            
+            if pipeline:
+                session['voice'] = new_voice
+                logger.info(f"Voice set to {new_voice} (language: {lang_code}) for client {sid}")
             else:
-                logger.warning(f"Voice {new_voice} not enabled (language not in enabled languages)")
+                logger.warning(f"Pipeline not available for voice {new_voice} (language: {lang_code})")
+                # Don't change voice if pipeline unavailable
         else:
             logger.warning(f"Unknown voice: {new_voice}")
-    
-    if 'speed' in data:
-        new_speed = float(data['speed'])
-        validated_speed = validate_speed(new_speed)
-        session['speed'] = validated_speed
-        if validated_speed != new_speed:
-            logger.warning(f"Speed {new_speed} clamped to {validated_speed} for client {sid}")
-        else:
-            logger.info(f"Speed set to {validated_speed} for client {sid}")
     
     if 'enabled' in data:
         session['enabled'] = data['enabled']
     
     client_tts_sessions[sid] = session
     
-    current_voice = session.get('voice', get_default_voice())
-    current_speed = session.get('speed', get_default_speed())
-    
     await sio.emit('tts_configured', {
-        'voice': current_voice,
-        'speed': current_speed,
-        'language': get_language_for_voice(current_voice),
-        'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(current_voice), 'Unknown'),
+        'voice': session.get('voice'),
+        'language': get_language_for_voice(session.get('voice', 'af_heart')),
+        'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(session.get('voice', 'af_heart')), 'Unknown'),
         'enabled': session.get('enabled'),
         'format': session.get('format'),
-        'pipeline_available': get_pipeline_for_voice(current_voice) is not None,
-        'voice_enabled': is_voice_enabled(current_voice),
-        'speed_range': {
-            'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            'max': tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
+        'pipeline_available': get_pipeline_for_voice(session.get('voice', 'af_heart')) is not None,
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
 @sio.event
 async def tts_configure_client(sid, data):
-    """Configure TTS for relay client with voice and speed validation"""
+    """Configure TTS for relay client with voice validation"""
     client_id = data.get('client_id')
     audio_sid = audio_client_mapping.get(client_id, client_id)
     
@@ -854,50 +707,29 @@ async def tts_configure_client(sid, data):
     if 'voice' in data:
         new_voice = data['voice']
         if new_voice in VOICE_LANGUAGE_MAP:
-            if is_voice_enabled(new_voice):
-                lang_code = get_language_for_voice(new_voice)
-                pipeline = get_pipeline_for_voice(new_voice)
-                
-                if pipeline:
-                    session['voice'] = new_voice
-                    logger.info(f"Voice set to {new_voice} (language: {lang_code}) for client {client_id}")
-                else:
-                    logger.warning(f"Pipeline not available for voice {new_voice} (language: {lang_code})")
+            lang_code = get_language_for_voice(new_voice)
+            pipeline = get_pipeline_for_voice(new_voice)
+            
+            if pipeline:
+                session['voice'] = new_voice
+                logger.info(f"Voice set to {new_voice} (language: {lang_code}) for client {client_id}")
             else:
-                logger.warning(f"Voice {new_voice} not enabled (language not in enabled languages)")
+                logger.warning(f"Pipeline not available for voice {new_voice} (language: {lang_code})")
         else:
             logger.warning(f"Unknown voice: {new_voice}")
-    
-    if 'speed' in data:
-        new_speed = float(data['speed'])
-        validated_speed = validate_speed(new_speed)
-        session['speed'] = validated_speed
-        if validated_speed != new_speed:
-            logger.warning(f"Speed {new_speed} clamped to {validated_speed} for client {client_id}")
-        else:
-            logger.info(f"Speed set to {validated_speed} for client {client_id}")
     
     if 'enabled' in data:
         session['enabled'] = data['enabled']
     
     client_tts_sessions[audio_sid] = session
     
-    current_voice = session.get('voice', get_default_voice())
-    current_speed = session.get('speed', get_default_speed())
-    
     await sio.emit('tts_client_configured', {
         'client_id': client_id,
-        'voice': current_voice,
-        'speed': current_speed,
-        'language': get_language_for_voice(current_voice),
-        'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(current_voice), 'Unknown'),
+        'voice': session.get('voice'),
+        'language': get_language_for_voice(session.get('voice', 'af_heart')),
+        'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(session.get('voice', 'af_heart')), 'Unknown'),
         'enabled': session.get('enabled'),
-        'pipeline_available': get_pipeline_for_voice(current_voice) is not None,
-        'voice_enabled': is_voice_enabled(current_voice),
-        'speed_range': {
-            'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            'max': tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
+        'pipeline_available': get_pipeline_for_voice(session.get('voice', 'af_heart')) is not None,
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
@@ -908,13 +740,11 @@ async def tts_get_voices(sid, data):
     
     for voice, lang_code in VOICE_LANGUAGE_MAP.items():
         pipeline = get_pipeline_for_voice(voice)
-        voice_enabled = is_voice_enabled(voice)
         voices_with_languages.append({
             'voice': voice,
             'language_code': lang_code,
             'language_name': SUPPORTED_LANGUAGES.get(lang_code, 'Unknown'),
-            'available': pipeline is not None,
-            'enabled': voice_enabled
+            'available': pipeline is not None
         })
     
     # Group by language
@@ -925,21 +755,14 @@ async def tts_get_voices(sid, data):
             languages[lang_code] = {
                 'code': lang_code,
                 'name': voice_info['language_name'],
-                'enabled': voice_info['enabled'],
                 'voices': []
             }
         languages[lang_code]['voices'].append(voice_info)
     
     await sio.emit('tts_voices_response', {
-        'voices': [voice for voice in VOICE_LANGUAGE_MAP.keys() if is_voice_enabled(voice)],
+        'voices': list(VOICE_LANGUAGE_MAP.keys()),
         'voices_detailed': voices_with_languages,
         'languages': languages,
-        'default_voice': get_default_voice(),
-        'default_speed': get_default_speed(),
-        'speed_range': {
-            'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            'max': tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
         'requesting_client': data.get('requesting_client'),
         'timestamp': datetime.now().isoformat()
     }, room=sid)
@@ -948,18 +771,15 @@ async def tts_get_voices(sid, data):
 async def tts_get_languages(sid, data):
     """Get supported languages and their status"""
     language_status = []
-    enabled_languages = get_enabled_languages()
     
     for lang_code, lang_name in SUPPORTED_LANGUAGES.items():
         pipeline = tts_pipelines.get(lang_code)
         voices = [voice for voice, voice_lang in VOICE_LANGUAGE_MAP.items() if voice_lang == lang_code]
-        is_enabled = lang_code in enabled_languages
         
         language_status.append({
             'code': lang_code,
             'name': lang_name,
             'available': pipeline is not None,
-            'enabled': is_enabled,
             'voices': voices,
             'voice_count': len(voices)
         })
@@ -967,32 +787,7 @@ async def tts_get_languages(sid, data):
     await sio.emit('tts_languages_response', {
         'languages': language_status,
         'total_languages': len(SUPPORTED_LANGUAGES),
-        'enabled_languages': len(enabled_languages),
         'active_languages': sum(1 for p in tts_pipelines.values() if p is not None),
-        'default_voice': get_default_voice(),
-        'default_speed': get_default_speed(),
-        'speed_range': {
-            'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            'max': tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
-        'requesting_client': data.get('requesting_client'),
-        'timestamp': datetime.now().isoformat()
-    }, room=sid)
-
-@sio.event
-async def tts_get_settings(sid, data):
-    """Get current TTS settings"""
-    await sio.emit('tts_settings_response', {
-        'default_voice': get_default_voice(),
-        'default_speed': get_default_speed(),
-        'enabled_languages': get_enabled_languages(),
-        'speed_range': {
-            'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            'max': tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
-        'max_sentence_length': tts_settings.get('max_sentence_length', 180) if tts_settings else 180,
-        'pipeline_timeout': tts_settings.get('pipeline_timeout', 300) if tts_settings else 300,
-        'generation_timeout': tts_settings.get('generation_timeout', 25.0) if tts_settings else 25.0,
         'requesting_client': data.get('requesting_client'),
         'timestamp': datetime.now().isoformat()
     }, room=sid)
@@ -1043,32 +838,21 @@ async def cleanup_stale_buffers():
 @app.get("/health")
 async def health_check():
     pipeline_status = {}
-    enabled_languages = get_enabled_languages()
-    
     for lang_code, pipeline in tts_pipelines.items():
         pipeline_status[lang_code] = {
             'available': pipeline is not None,
-            'enabled': lang_code in enabled_languages,
             'language_name': SUPPORTED_LANGUAGES.get(lang_code, 'Unknown'),
             'voice_count': len([v for v, l in VOICE_LANGUAGE_MAP.items() if l == lang_code])
         }
     
     return {
         "status": "healthy",
-        "version": "2.1.0-settings",
+        "version": "2.0.0-multilang",
         "pipelines": pipeline_status,
         "total_languages": len(SUPPORTED_LANGUAGES),
-        "enabled_languages": len(enabled_languages),
         "active_pipelines": sum(1 for p in tts_pipelines.values() if p is not None),
         "active_clients": len(client_sentence_buffers),
         "supported_voices": len(VOICE_LANGUAGE_MAP),
-        "enabled_voices": len([v for v in VOICE_LANGUAGE_MAP.keys() if is_voice_enabled(v)]),
-        "default_voice": get_default_voice(),
-        "default_speed": get_default_speed(),
-        "speed_range": {
-            "min": tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            "max": tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
         "timestamp": datetime.now().isoformat()
     }
 
@@ -1076,18 +860,14 @@ async def health_check():
 async def get_languages():
     """REST endpoint for language information"""
     language_info = []
-    enabled_languages = get_enabled_languages()
-    
     for lang_code, lang_name in SUPPORTED_LANGUAGES.items():
         pipeline = tts_pipelines.get(lang_code)
         voices = [voice for voice, voice_lang in VOICE_LANGUAGE_MAP.items() if voice_lang == lang_code]
-        is_enabled = lang_code in enabled_languages
         
         language_info.append({
             'code': lang_code,
             'name': lang_name,
             'available': pipeline is not None,
-            'enabled': is_enabled,
             'voices': voices,
             'voice_count': len(voices)
         })
@@ -1095,7 +875,6 @@ async def get_languages():
     return {
         "languages": language_info,
         "total_languages": len(SUPPORTED_LANGUAGES),
-        "enabled_languages": len(enabled_languages),
         "active_languages": sum(1 for p in tts_pipelines.values() if p is not None),
         "timestamp": datetime.now().isoformat()
     }
@@ -1107,39 +886,17 @@ async def get_voices():
     
     for voice, lang_code in VOICE_LANGUAGE_MAP.items():
         pipeline = get_pipeline_for_voice(voice)
-        voice_enabled = is_voice_enabled(voice)
         voices_with_languages.append({
             'voice': voice,
             'language_code': lang_code,
             'language_name': SUPPORTED_LANGUAGES.get(lang_code, 'Unknown'),
-            'available': pipeline is not None,
-            'enabled': voice_enabled
+            'available': pipeline is not None
         })
     
     return {
         "voices": voices_with_languages,
         "total_voices": len(VOICE_LANGUAGE_MAP),
-        "enabled_voices": len([v for v in voices_with_languages if v['enabled']]),
         "available_voices": sum(1 for v in voices_with_languages if v['available']),
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/settings")
-async def get_settings():
-    """REST endpoint for TTS settings"""
-    return {
-        "default_voice": get_default_voice(),
-        "default_speed": get_default_speed(),
-        "enabled_languages": get_enabled_languages(),
-        "speed_range": {
-            "min": tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
-            "max": tts_settings.get('speed_max', 2.0) if tts_settings else 2.0
-        },
-        "max_sentence_length": tts_settings.get('max_sentence_length', 180) if tts_settings else 180,
-        "pipeline_timeout": tts_settings.get('pipeline_timeout', 300) if tts_settings else 300,
-        "generation_timeout": tts_settings.get('generation_timeout', 25.0) if tts_settings else 25.0,
-        "chunk_limit": tts_settings.get('chunk_limit', 40) if tts_settings else 40,
-        "chunk_timeout": tts_settings.get('chunk_timeout', 3.0) if tts_settings else 3.0,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -1162,7 +919,6 @@ sio_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app)
 async def main():
     settings = load_config()
     await initialize_flagembedding_settings(settings)
-    await initialize_tts_settings(settings)
     asyncio.create_task(cleanup_stale_buffers())
 
     config = uvicorn.Config(
@@ -1175,20 +931,16 @@ async def main():
     )
 
     server = uvicorn.Server(config)
-    logger.info("🌍 Starting Multi-Language Kokoro TTS Server with Dynamic Settings...")
+    logger.info("🌍 Starting Multi-Language Kokoro TTS Server...")
     logger.info(f"📡 Server: http://{config.host}:{config.port}")
     logger.info(f"🔌 Socket.IO: http://{config.host}:{config.port}/socket.io/")
     logger.info(f"💡 Health check: http://{config.host}:{config.port}/health")
     logger.info(f"🌐 Languages: http://{config.host}:{config.port}/languages")
     logger.info(f"🎤 Voices: http://{config.host}:{config.port}/voices")
-    logger.info(f"⚙️ Settings: http://{config.host}:{config.port}/settings")
     
-    # Log TTS configuration
-    logger.info(f"🎵 Default voice: {get_default_voice()}")
-    logger.info(f"⚡ Default speed: {get_default_speed()}")
-    enabled_langs = get_enabled_languages()
-    enabled_lang_names = [f"{code} ({SUPPORTED_LANGUAGES.get(code, 'Unknown')})" for code in enabled_langs]
-    logger.info(f"🗣️ Enabled languages: {', '.join(enabled_lang_names)}")
+    # Log supported languages
+    supported_langs = ", ".join([f"{code} ({name})" for code, name in SUPPORTED_LANGUAGES.items()])
+    logger.info(f"🗣️ Supported languages: {supported_langs}")
 
     await server.serve()
 
