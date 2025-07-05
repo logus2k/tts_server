@@ -1015,6 +1015,54 @@ async def tts_client_disconnect(sid, data):
         if audio_sid in client_tts_sessions:
             del client_tts_sessions[audio_sid]
 
+
+@sio.event
+async def stop_generation(sid, data):
+    """Handle stop of TTS generation - IMPROVED VERSION"""
+    client_id = data.get('client_id')
+    reason = data.get('reason', 'unknown')
+    
+    logger.info(f"🚨 STOP GENERATION RECEIVED: {client_id} (reason: {reason})")
+    
+    # Find the audio connection
+    audio_sid = audio_client_mapping.get(client_id, client_id)
+    
+    if audio_sid in client_sentence_buffers:
+        try:
+            # SURGICAL FIX: Completely recreate the buffer instead of just stopping
+            old_buffer = client_sentence_buffers[audio_sid]
+            await old_buffer.close()
+            
+            # Create fresh buffer to ensure complete stop
+            client_sentence_buffers[audio_sid] = APIStreamingSentenceBuffer(audio_sid, flagembedding_settings)
+            
+            logger.info(f"🚨 RECREATED sentence buffer for complete stop: {audio_sid}")
+        except Exception as e:
+            logger.error(f"Error recreating buffer: {e}")
+    
+    # CRITICAL: Send immediate stop signal to client to stop any playing audio
+    await sio.emit('tts_stop_immediate', {
+        'client_id': client_id,
+        'reason': reason,
+        'timestamp': datetime.now().isoformat()
+    }, room=audio_sid)
+    
+    logger.info(f"🚨 Stop generation completed for {client_id}")
+
+@sio.event
+async def stop_current_generation(sid, data):
+    """Handle immediate stop of current TTS generation"""
+    client_id = data.get('client_id')
+    immediate = data.get('immediate', False)
+    
+    logger.info(f"🚨 STOP CURRENT GENERATION: {client_id} (immediate: {immediate})")
+    
+    # Use the same logic as stop_generation
+    await stop_generation(sid, data)
+
+
+
+
 # Cleanup task
 async def cleanup_stale_buffers():
     """Clean up stale buffers"""
