@@ -6,7 +6,7 @@
 	"reload": false,
 	"TTS": {
 		"default_voice": "af_heart",
-		"default_speed": 1.20,
+		"default_speed": 1.0,
 		"enabled_languages": [
 			"a",
 			"b",

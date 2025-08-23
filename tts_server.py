@@ -128,7 +128,7 @@ async def initialize_tts_settings(settings: dict):
     global tts_settings
     tts_settings = settings.get("TTS", {
         "default_voice": "af_heart",
-        "default_speed": 1.20,
+        "default_speed": 1.0,
         "enabled_languages": ["a", "b", "j", "z", "e", "f", "h", "i", "p"],
         "pipeline_timeout": 300,
         "max_sentence_length": 500,  # Increased
@@ -136,7 +136,7 @@ async def initialize_tts_settings(settings: dict):
         "chunk_timeout": 3.0,
         "generation_timeout": 25.0,
         "speed_min": 0.5,
-        "speed_max": 2.0
+        "speed_max": 1.5
     })
     
     logger.info(f"TTS Settings loaded:")
@@ -161,8 +161,8 @@ def get_default_voice():
 def get_default_speed():
     """Get default speed from settings"""
     if not tts_settings:
-        return 1.20
-    return tts_settings.get('default_speed', 1.20)
+        return 1.0
+    return tts_settings.get('default_speed', 1.0)
 
 def validate_speed(speed: float) -> float:
     """Validate and clamp speed within allowed range"""
