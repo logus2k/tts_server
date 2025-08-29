@@ -19,13 +19,12 @@ services:
         max-size: "10m"
         max-file: "3"    
     networks:
-      - pm
+      logus2k_network:
     ports:
       - "7700:7700"
     volumes:
       - ~/env/tts_server/data:/tts_server/data:ro
 
 networks:
-  pm:
-    name: pm-network
+  logus2k_network:
     external: true
