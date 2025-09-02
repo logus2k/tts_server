@@ -19,7 +19,7 @@ RUN pip install pypinyin
 RUN pip install cn2an
 RUN pip install jieba
 
-RUN pip install kokoro==0.9.4 fastapi aiohttp uvicorn python-socketio soundfile numpy torch
+RUN pip install kokoro==0.9.4 fastapi aiohttp uvicorn python-socketio soundfile numpy torch sacremoses
 
 RUN python -m spacy download en_core_web_sm
 

@@ -15,6 +15,7 @@ import io
 import logging
 from typing import Dict, List, Optional, AsyncGenerator
 from datetime import datetime
+import time
 import numpy as np
 import soundfile as sf
 from fastapi import FastAPI
@@ -26,6 +27,8 @@ import urllib.parse
 import json
 from pathlib import Path
 import re  # For sentence splitting
+import spacy
+from sacremoses import MosesTokenizer, MosesDetokenizer
 
 
 # Configure logging
@@ -123,6 +126,89 @@ SUPPORTED_LANGUAGES = {
     'i': 'Italian',              # 2 voices
     'p': 'Brazilian Portuguese', # 3 voices
 }
+
+# ---------- Sacremoses (per-sentence) ----------
+_DETOK_CACHE = {}
+_TOK_CACHE = {}
+_SUPPORTED_MOSES_LANGS = {"en", "pt"}
+
+def _norm_lang_code(lang_code: str) -> str:
+    base = (lang_code or "en").split("-")[0].lower()
+    return base if base in _SUPPORTED_MOSES_LANGS else "en"
+
+def _get_detok(lang_code: str) -> MosesDetokenizer:
+    lang = _norm_lang_code(lang_code)
+    if lang not in _DETOK_CACHE:
+        _DETOK_CACHE[lang] = MosesDetokenizer(lang=lang)
+    return _DETOK_CACHE[lang]
+
+def _get_tok(lang_code: str) -> MosesTokenizer:
+    lang = _norm_lang_code(lang_code)
+    if lang not in _TOK_CACHE:
+        _TOK_CACHE[lang] = MosesTokenizer(lang=lang)
+    return _TOK_CACHE[lang]
+
+def _detok_sentence(text: str, lang_code: str) -> str:
+    if not text:
+        return text
+    tok = _get_tok(lang_code)
+    detok = _get_detok(lang_code)
+    return detok.detokenize(tok.tokenize(text, escape=False))
+
+
+# ---------- spaCy sentencizer (fast, rule-based) ----------
+_SPACY_CACHE = {}
+
+def _get_sentencizer(lang_code: str):
+    lang = (lang_code or "en").split("-")[0].lower()
+    if lang not in ("en", "pt"):
+        lang = "en"
+    if lang in _SPACY_CACHE:
+        return _SPACY_CACHE[lang]
+
+    # Prefer blank pipeline + sentencizer (fast, tiny). If full model exists, we still exclude heavy pipes.
+    try:
+        model_name = "en_core_web_sm" if lang == "en" else "pt_core_news_sm"
+        nlp = spacy.load(model_name, exclude=["tagger", "parser", "ner", "lemmatizer", "attribute_ruler"])
+    except Exception:
+        nlp = spacy.blank(lang)
+
+    # Ensure we have a rule-based sentence splitter with our punctuation set
+    if "senter" in nlp.pipe_names:
+        pass
+    elif "sentencizer" not in nlp.pipe_names:
+        nlp.add_pipe("sentencizer", config={"punct_chars": [".", "!", "?", "…", "。", "？", "！"]})
+    _SPACY_CACHE[lang] = nlp
+    return nlp
+
+def _split_sentences_spacy(text: str, lang_code: str, treat_nl_as_boundary: bool) -> list[str]:
+    if not text:
+        return []
+    nlp = _get_sentencizer(lang_code)
+    if treat_nl_as_boundary and "\n" in text:
+        out = []
+        for seg in re.split(r"\n+", text):
+            seg = seg.strip()
+            if not seg:
+                continue
+            doc = nlp(seg)
+            out.extend(s.text.strip() for s in doc.sents if s.text.strip())
+        return out
+    doc = nlp(text)
+    return [s.text.strip() for s in doc.sents if s.text.strip()]
+
+# ---------- streaming join (no auto-spaces) ----------
+def _append_stream(prev: str, nxt: str) -> str:
+    """Append chunk without inserting spaces; collapse double whitespace at seam."""
+    if not prev:
+        return (nxt or "").replace("’", "'")
+    if not nxt:
+        return prev
+    nxt = nxt.replace("’", "'")
+    if prev[-1].isspace() and nxt[:1].isspace():
+        return prev + nxt.lstrip()
+    return prev + nxt
+
 
 async def initialize_tts_settings(settings: dict):
     global tts_settings
@@ -270,6 +356,8 @@ sio = socketio.AsyncServer(
     cors_allowed_origins=[
         "https://logus2k.com",
         "https://www.logus2k.com",
+        "http://localhost:7676",
+        "http://127.0.0.1:7676",
         "http://localhost:7800",
         "http://127.0.0.1:7800"
     ],
@@ -589,6 +677,9 @@ async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id
 @sio.event
 async def connect(sid, environ):
     """Handle client connection"""
+
+    logger.info(f"TTS CONNECT: {sid}")
+
     query_params = environ.get('QUERY_STRING', '')
     main_client_id = None
     connection_type = 'unknown'
@@ -616,6 +707,8 @@ async def connect(sid, environ):
         'main_client_id': main_client_id,
         'connection_type': connection_type
     }
+
+    logger.info(f"SESSION CREATED: {sid}")    
     
     # Send confirmation with language and settings info
     active_languages = [lang for lang, pipeline in tts_pipelines.items() if pipeline is not None]
@@ -697,6 +790,7 @@ async def disconnect(sid):
     if sid in client_tts_sessions:
         del client_tts_sessions[sid]
 
+"""
 @sio.event
 async def register_audio_client(sid, data):
     main_client_id = data.get('main_client_id')
@@ -719,116 +813,200 @@ async def register_audio_client(sid, data):
         "speed": data.get("speed", get_default_speed()),
         "enabled": data.get("enabled", True)
     }
+"""
+@sio.event
+async def register_audio_client(sid, data):
+
+    logger.info(f"REGISTER CALLED: {sid} with {data}")
+
+    main_client_id = data.get('main_client_id')
+    
+    if main_client_id and main_client_id != 'unknown':
+        # Support multiple audio clients per main client
+        if main_client_id not in audio_client_mapping:
+            audio_client_mapping[main_client_id] = []
+
+        if sid not in audio_client_mapping[main_client_id]:
+            audio_client_mapping[main_client_id].append(sid)
+            logger.info(f"🎵 Audio mapping: {main_client_id} -> {audio_client_mapping[main_client_id]}")
+    
+    # PRESERVE existing format preference from connection
+    existing_session = client_tts_sessions.get(sid, {})
+    existing_format = existing_session.get('format', 'base64')
+    
+    client_tts_sessions[sid] = {
+        "connection_type": data.get("connection_type", "browser"),
+        "mode": data.get("mode", "tts"),
+        "format": data.get("format", existing_format),  # ← PRESERVE existing format
+        "voice": data.get("voice", get_default_voice()),
+        "speed": data.get("speed", get_default_speed()),
+        "enabled": data.get("enabled", True)
+    }
+
+    logger.info(f"FINAL SESSION: {sid} -> {client_tts_sessions.get(sid, 'NOT_FOUND')}")
+
 
 
 
 @sio.event
 async def tts_text_chunk(sid, data):
+    """
+    - Per-client buffering
+    - Raw append (no extra spaces) to avoid mid-word breaks
+    - spaCy sentencizer for boundaries (., !, ?, … and CJK 。？！)
+    - Idle-timeout flush that never cuts a word in half
+    - Per-sentence Sacremoses detokenization (EN/PT) just before TTS
+    """
     try:
-        text_chunk = data.get('chunk', '')
-        is_final = data.get('final', False)
-        target_client_id = data.get('target_client_id', data.get('client_id', sid))
+        max_len              = (tts_settings or {}).get("max_sentence_length", 500)
+        idle_timeout_s       = (tts_settings or {}).get("buffer_idle_timeout", 0.25)
+        treat_nl_as_boundary = (tts_settings or {}).get("treat_newline_as_boundary", True)
+
+        global _tts_buffers, _tts_last_touch
+        if "_tts_buffers" not in globals():    _tts_buffers = {}     # client_id -> str
+        if "_tts_last_touch" not in globals(): _tts_last_touch = {}  # client_id -> float
+
+        text_chunk       = data.get("chunk", "") or ""
+        is_final         = bool(data.get("final", False))
+        target_client_id = data.get("target_client_id", data.get("client_id", sid))
 
         if not text_chunk and not is_final:
             return
 
-        # Resolve audio clients
+        # resolve session (unchanged)
         audio_sids = audio_client_mapping.get(target_client_id, [target_client_id])
         if isinstance(audio_sids, str):
             audio_sids = [audio_sids]
         elif not isinstance(audio_sids, list):
             audio_sids = [target_client_id]
 
-        # Use primary session for config sanity
         primary_audio_sid = audio_sids[0] if audio_sids else target_client_id
         session = client_tts_sessions.get(primary_audio_sid, {
-            'voice': get_default_voice(),
-            'speed': get_default_speed(),
-            'enabled': True,
-            'mode': 'tts',
-            'format': 'base64'
+            "voice": get_default_voice(),
+            "speed": get_default_speed(),
+            "enabled": True,
+            "mode": "tts",
+            "format": "base64"
         })
-
-        if not session.get('enabled', True):
+        if not session.get("enabled", True):
             return
 
-        voice = session.get('voice', get_default_voice())
-        speed = session.get('speed', get_default_speed())
-        lang_code = get_language_for_voice(voice)
+        voice     = session.get("voice", get_default_voice())
+        speed     = session.get("speed", get_default_speed())
+        lang_code = get_language_for_voice(voice) or "en"
+        norm_lang = _norm_lang_code(lang_code)
 
         if not is_voice_enabled(voice):
-            logger.warning(f"Voice {voice} not enabled (language {lang_code} not in enabled languages)")
+            logger.warning(f"Voice {voice} not enabled (language {lang_code})")
             return
 
-        # Split long text into sentences
-        sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a.z]\.)(?<=\.|\?)\s', text_chunk)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Append (no auto-space)
+        buf = _tts_buffers.get(target_client_id, "")
+        if text_chunk:
+            buf = _append_stream(buf, text_chunk)
+            _tts_buffers[target_client_id] = buf
+            _tts_last_touch[target_client_id] = time.time()
 
-        for sentence in sentences:
-            max_length = tts_settings.get('max_sentence_length', 500) if tts_settings else 500
-            if len(sentence) > max_length:
-                sentence = sentence[:max_length] + "..."
-            
-            logger.info(f"🎵 TTS: {sentence[:40]}... broadcasting to {len(audio_sids)} clients (voice: {voice}, lang: {lang_code}, speed: {speed})")
-            
+        # Sentence detection on raw buffer (spaCy)
+        buffered = _tts_buffers.get(target_client_id, "")
+        parts = _split_sentences_spacy(buffered, norm_lang, treat_nl_as_boundary)
+
+        to_speak, keep_tail = [], ""
+        if parts:
+            for i, p in enumerate(parts):
+                if i == len(parts) - 1:
+                    if is_final:
+                        to_speak.append(p)
+                    else:
+                        keep_tail = p
+                else:
+                    to_speak.append(p)
+
+        # Idle-timeout flush: only if tail doesn't end mid-word (incl. accented letters)
+        now = time.time()
+        last = _tts_last_touch.get(target_client_id, now)
+        if (not is_final) and (not to_speak) and keep_tail and (now - last) >= idle_timeout_s:
+            if re.search(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ]$", keep_tail):
+                pass  # likely mid-word: hold buffer
+            else:
+                to_speak.append(keep_tail)
+                keep_tail = ""
+
+        _tts_buffers[target_client_id] = keep_tail
+
+        # Generate audio per complete sentence (detokenize once per sentence)
+        for sentence in to_speak:
+            s_raw = sentence.strip()
+            if not s_raw:
+                continue
+            if len(s_raw) > max_len:
+                s_raw = s_raw[:max_len] + "..."
+
+            try:
+                s = _detok_sentence(s_raw, norm_lang)
+            except Exception as detok_err:
+                logger.warning(f"Detokenize failed for lang={norm_lang}: {detok_err}")
+                s = s_raw
+
+            logger.info(f"TTS: {s[:60]}... (voice: {voice}, lang: {norm_lang}, speed: {speed})")
+
             for audio_sid in audio_sids:
                 try:
-                    session = client_tts_sessions.get(audio_sid, {})
-                    conn_type = session.get("connection_type", "browser")
-                    mode = session.get("mode", "tts")
-                    format_type = session.get("format", "base64")
+                    sess        = client_tts_sessions.get(audio_sid, {})
+                    format_type = sess.get("format", "base64")
+                    mode        = sess.get("mode", "tts")
+                    conn_type   = sess.get("connection_type", "browser")
 
-                    if conn_type == "avatar_server":
-                        logger.info(f"🎬 Sending audio to Avatar Server: {audio_sid}")
-                    elif mode == "tts":
-                        logger.info(f"🎵 Sending audio to TTS mode client: {audio_sid}")
-                    else:
-                        logger.info(f"🎬 Skipping audio for Avatar mode browser client: {audio_sid}")
+                    if conn_type != "avatar_server" and mode != "tts":
                         continue
 
                     if format_type == "binary":
-                        async for metadata, binary_data in generate_tts_binary(sentence, voice, speed, target_client_id):
+                        async for metadata, binary_data in generate_tts_binary(s, voice, speed, target_client_id):
                             if binary_data is not None:
-                                metadata_with_binary = metadata.copy()
-                                metadata_with_binary['audio_data'] = binary_data
-                                await sio.emit('tts_audio_chunk', metadata_with_binary, room=audio_sid)
+                                md = metadata.copy()
+                                md["audio_buffer"] = binary_data
+                                await sio.emit("tts_audio_chunk", md, room=audio_sid)
                             else:
-                                await sio.emit('tts_sentence_complete', metadata, room=audio_sid)
+                                await sio.emit("tts_sentence_complete", metadata, room=audio_sid)
                     else:
-                        async for chunk_data in generate_tts_base64(sentence, voice, speed, target_client_id):
-                            await sio.emit('tts_audio_chunk', chunk_data, room=audio_sid)
+                        async for chunk_data in generate_tts_base64(s, voice, speed, target_client_id):
+                            await sio.emit("tts_audio_chunk", chunk_data, room=audio_sid)
 
                 except Exception as e:
-                    logger.error(f"Error sending TTS to audio client {audio_sid}: {e}")
+                    logger.error(f"Error sending TTS to {audio_sid}: {e}")
 
+        # Final flush
         if is_final:
+            _tts_buffers.pop(target_client_id, None)
+            _tts_last_touch.pop(target_client_id, None)
             for audio_sid in audio_sids:
-                session = client_tts_sessions.get(audio_sid, {})
-                conn_type = session.get('connection_type', 'browser')
-                mode = session.get('mode', 'tts')
-                if conn_type == "avatar_server" or mode == "tts":
-                    try:
-                        await sio.emit('tts_response_complete', {
-                            'timestamp': datetime.now().isoformat(),
-                            'client_id': target_client_id
-                        }, room=audio_sid)
-                    except Exception as e:
-                        logger.error(f"Error sending completion to {audio_sid}: {e}")
+                try:
+                    await sio.emit("tts_response_complete", {
+                        "timestamp": datetime.now().isoformat(),
+                        "client_id": target_client_id
+                    }, room=audio_sid)
+                except Exception as e:
+                    logger.error(f"Error sending completion to {audio_sid}: {e}")
 
     except Exception as e:
         logger.error(f"Text chunk processing error: {e}")
-        audio_sids = audio_client_mapping.get(target_client_id, [target_client_id])
-        if isinstance(audio_sids, str):
-            audio_sids = [audio_sids]
-        for audio_sid in audio_sids:
-            try:
-                await sio.emit('tts_error', {
-                    'error': str(e),
-                    'timestamp': datetime.now().isoformat(),
-                    'client_id': target_client_id
+        # Best-effort error fanout
+        try:
+            target_client_id = data.get("target_client_id", data.get("client_id", sid))
+            audio_sids = audio_client_mapping.get(target_client_id, [target_client_id])
+            if isinstance(audio_sids, str):
+                audio_sids = [audio_sids]
+            for audio_sid in audio_sids:
+                await sio.emit("tts_error", {
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat(),
+                    "client_id": target_client_id
                 }, room=audio_sid)
-            except Exception as send_error:
-                logger.error(f"Error sending error to {audio_sid}: {send_error}")
+        except Exception as send_error:
+            logger.error(f"Error sending error to clients: {send_error}")
+
+
+
 
 @sio.event
 async def tts_configure(sid, data):
