@@ -354,6 +354,7 @@ async def lifespan(app: FastAPI):
 # Create Socket.IO server
 sio = socketio.AsyncServer(
     cors_allowed_origins=[
+        "https://www.logus2k.com/tts",
         "https://logus2k.com",
         "https://www.logus2k.com",
         "http://localhost:7676",
