@@ -360,7 +360,9 @@ sio = socketio.AsyncServer(
         "http://localhost:7676",
         "http://127.0.0.1:7676",
         "http://localhost:7800",
-        "http://127.0.0.1:7800"
+        "http://127.0.0.1:7800",
+        "http://localhost:7701",
+        "http://127.0.0.1:7701"
     ],
     logger=False,
     engineio_logger=False,
