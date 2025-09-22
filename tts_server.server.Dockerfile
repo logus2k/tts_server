@@ -21,6 +21,8 @@ RUN pip install jieba
 
 RUN pip install kokoro==0.9.4 fastapi aiohttp uvicorn python-socketio soundfile numpy torch sacremoses
 
+RUN pip install markdown emoji
+
 RUN python -m spacy download en_core_web_sm
 
 WORKDIR /tts_server
