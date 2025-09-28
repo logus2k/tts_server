@@ -354,7 +354,6 @@ async def lifespan(app: FastAPI):
 # Create Socket.IO server
 sio = socketio.AsyncServer(
     cors_allowed_origins=[
-        "https://www.logus2k.com/tts",
         "https://logus2k.com",
         "https://www.logus2k.com",
         "http://localhost:7676",
@@ -364,11 +363,11 @@ sio = socketio.AsyncServer(
         "http://localhost:7701",
         "http://127.0.0.1:7701",
         "http://localhost:6678",
-        "http://127.0.0.1:6678"
+        "http://127.0.0.1:6678",
     ],
     logger=False,
     engineio_logger=False,
-    async_mode='asgi'
+    async_mode="asgi",
 )
 
 # FastAPI app
