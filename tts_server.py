@@ -214,11 +214,11 @@ async def initialize_tts_settings(settings: dict):
     global tts_settings
     tts_settings = settings.get("TTS", {
         "default_voice": "af_heart",
-        "default_speed": 1.0,
+        "default_speed": 1.2,
         "enabled_languages": ["a", "b", "j", "z", "e", "f", "h", "i", "p"],
         "pipeline_timeout": 300,
-        "max_sentence_length": 500,  # Increased
-        "chunk_limit": 40,
+        "max_sentence_length": 1000,
+        "chunk_limit": 250,
         "chunk_timeout": 3.0,
         "generation_timeout": 25.0,
         "speed_min": 0.5,
