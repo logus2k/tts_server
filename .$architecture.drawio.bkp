@@ -1,0 +1,296 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.5.2 Chrome/142.0.7444.265 Electron/39.6.1 Safari/537.36" version="29.5.2">
+  <diagram id="tts-server-architecture" name="TTS Server Architecture">
+    <mxGraphModel dx="2066" dy="1202" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#1a1a2e;" value="TTS Server Technical Architecture" vertex="1">
+          <mxGeometry height="36" width="320" x="540" y="17" as="geometry" />
+        </mxCell>
+        <mxCell id="clients_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=8;dashed=1;dashPattern=5 5;" value="Clients" vertex="1">
+          <mxGeometry height="100" width="940" x="230" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="browser_client" parent="1" style="shape=mxgraph.cisco.computers_and_peripherals.web_browser;html=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=10;whiteSpace=wrap;fontSize=11;" value="&lt;b&gt;Browser Client&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Socket.IO (base64)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="120" x="310" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="avatar_client" parent="1" style="shape=mxgraph.cisco.computers_and_peripherals.web_browser;html=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=10;whiteSpace=wrap;fontSize=11;" value="&lt;b&gt;Avatar Server&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Socket.IO (binary)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="120" x="500" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="relay_client" parent="1" style="shape=mxgraph.cisco.computers_and_peripherals.web_browser;html=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=10;whiteSpace=wrap;fontSize=11;" value="&lt;b&gt;Relay Client&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;Socket.IO (proxy)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="120" x="690" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="rest_consumer" parent="1" style="shape=mxgraph.cisco.computers_and_peripherals.web_browser;html=1;fillColor=#d5e8d4;strokeColor=#82b366;rounded=1;arcSize=10;whiteSpace=wrap;fontSize=11;" value="&lt;b&gt;REST Consumer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;HTTP GET&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="120" x="960" y="90" as="geometry" />
+        </mxCell>
+        <mxCell id="uvicorn" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;arcSize=12;" value="&lt;b&gt;Uvicorn&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;ASGI Server&lt;br&gt;0.0.0.0 : 7700&lt;/font&gt;" vertex="1">
+          <mxGeometry height="50" width="320" x="540" y="206" as="geometry" />
+        </mxCell>
+        <mxCell id="e_browser_uv" edge="1" parent="1" source="browser_client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;strokeWidth=1.5;" target="uvicorn">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="370" y="169" />
+              <mxPoint x="700" y="169" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_avatar_uv" edge="1" parent="1" source="avatar_client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;strokeWidth=1.5;" target="uvicorn">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_relay_uv" edge="1" parent="1" source="relay_client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;strokeWidth=1.5;" target="uvicorn">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_rest_uv" edge="1" parent="1" source="rest_consumer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=1.5;dashed=1;" target="uvicorn">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1020" y="170" />
+              <mxPoint x="700" y="170" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="socketio_app" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;arcSize=10;" value="&lt;b&gt;Socket.IO AsyncServer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;python-socketio (ASGI)&lt;br&gt;WebSocket transport&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="240" x="205" y="272" as="geometry" />
+        </mxCell>
+        <mxCell id="fastapi_app" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;arcSize=10;" value="&lt;b&gt;FastAPI&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;REST API &amp;amp; Lifespan Manager&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="220" x="850" y="272" as="geometry" />
+        </mxCell>
+        <mxCell id="sio_asgi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=10;arcSize=8;" value="&lt;font style=&quot;font-size:10px&quot;&gt;&lt;b&gt;socketio.ASGIApp&lt;/b&gt;&lt;br&gt;wraps FastAPI&lt;/font&gt;" vertex="1">
+          <mxGeometry height="48" width="220" x="590" y="275" as="geometry" />
+        </mxCell>
+        <mxCell id="e_uv_sio_asgi" edge="1" parent="1" source="uvicorn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b85450;strokeWidth=1.5;" target="sio_asgi">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_asgi_sio" edge="1" parent="1" source="sio_asgi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#d6b656;strokeWidth=1.5;" target="socketio_app">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_asgi_fast" edge="1" parent="1" source="sio_asgi" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#d6b656;strokeWidth=1.5;" target="fastapi_app">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="rest_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;fontStyle=1;fontSize=11;arcSize=8;dashed=1;" value="REST Endpoints" vertex="1">
+          <mxGeometry height="105" width="260" x="830" y="376" as="geometry" />
+        </mxCell>
+        <mxCell id="ep_health" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;" value="/health" vertex="1">
+          <mxGeometry height="28" width="70" x="845" y="401" as="geometry" />
+        </mxCell>
+        <mxCell id="ep_languages" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;" value="/languages" vertex="1">
+          <mxGeometry height="28" width="75" x="925" y="401" as="geometry" />
+        </mxCell>
+        <mxCell id="ep_voices" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;" value="/voices" vertex="1">
+          <mxGeometry height="28" width="65" x="1010" y="401" as="geometry" />
+        </mxCell>
+        <mxCell id="ep_settings" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontStyle=1;" value="/settings" vertex="1">
+          <mxGeometry height="28" width="70" x="845" y="441" as="geometry" />
+        </mxCell>
+        <mxCell id="e_fast_rest" edge="1" parent="1" source="fastapi_app" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#9673a6;strokeWidth=1.5;" target="rest_group">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sio_events_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;fontStyle=1;fontSize=11;arcSize=6;dashed=1;" value="Socket.IO Event Handlers" vertex="1">
+          <mxGeometry height="105" width="620" x="170" y="376" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_connect" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontStyle=1;" value="connect /&lt;br&gt;disconnect" vertex="1">
+          <mxGeometry height="32" width="80" x="183" y="401" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_register" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontStyle=1;" value="register_&lt;br&gt;audio_client" vertex="1">
+          <mxGeometry height="32" width="80" x="273" y="401" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_text_chunk" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcc00;strokeColor=#d6b656;fontSize=10;fontStyle=0;" value="&lt;b&gt;tts_text_chunk&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;(main pipeline)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="40" width="115" x="402.5" y="397" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_configure" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontStyle=1;" value="tts_configure /&lt;br&gt;tts_configure_client" vertex="1">
+          <mxGeometry height="32" width="115" x="557" y="399" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_stop" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontStyle=1;" value="stop_generation" vertex="1">
+          <mxGeometry height="32" width="90" x="682" y="399" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_get_info" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontStyle=1;" value="tts_get_voices /&lt;br&gt;languages / settings" vertex="1">
+          <mxGeometry height="30" width="130" x="303" y="443" as="geometry" />
+        </mxCell>
+        <mxCell id="ev_set_mode" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;fontStyle=1;" value="set_client_mode&lt;br&gt;&lt;font style=&quot;font-size:8px&quot;&gt;(tts / avatar)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="30" width="105" x="183" y="443" as="geometry" />
+        </mxCell>
+        <mxCell id="e_sio_events" edge="1" parent="1" source="socketio_app" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#d6b656;strokeWidth=1.5;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" target="sio_events_group">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_events_session" edge="1" parent="1" source="sio_events_group" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666666;strokeWidth=1;dashed=1;" target="session_mgmt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_buf_spacy" edge="1" parent="1" source="text_buffer" style="rounded=1;strokeColor=#82b366;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="spacy_sent">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_spacy_idle" edge="1" parent="1" source="spacy_sent" style="rounded=1;strokeColor=#82b366;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="idle_flush">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_idle_sacre" edge="1" parent="1" source="idle_flush" style="rounded=1;strokeColor=#82b366;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="sacremoses">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_chunk_textproc" edge="1" parent="1" source="ev_text_chunk" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#d6b656;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="text_proc_group">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tts_engine_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;fontStyle=1;fontSize=12;arcSize=6;dashed=1;" value="Kokoro TTS Engine" vertex="1">
+          <mxGeometry height="120" width="460" x="130" y="665" as="geometry" />
+        </mxCell>
+        <mxCell id="voice_map" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="&lt;b&gt;Voice-Language&lt;br&gt;Mapping&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;53 voices&lt;br&gt;9 languages&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="105" x="145" y="695" as="geometry" />
+        </mxCell>
+        <mxCell id="kpipeline" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="&lt;b&gt;KPipeline&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Per-language instances&lt;br&gt;Concurrent init&lt;br&gt;Thread-pool execution&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="140" x="275" y="695" as="geometry" />
+        </mxCell>
+        <mxCell id="gen_functions" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="&lt;b&gt;Audio Generators&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;generate_tts_binary()&lt;br&gt;generate_tts_base64()&lt;br&gt;&lt;i&gt;async generators&lt;/i&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="135" x="440" y="695" as="geometry" />
+        </mxCell>
+        <mxCell id="e_vmap_kpipe" edge="1" parent="1" source="voice_map" style="rounded=1;strokeColor=#b85450;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="kpipeline">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_kpipe_gen" edge="1" parent="1" source="kpipeline" style="rounded=1;strokeColor=#b85450;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="gen_functions">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_textproc_tts" edge="1" parent="1" source="text_proc_group" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#82b366;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="tts_engine_group">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_textproc_tts_label" connectable="0" parent="e_textproc_tts" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;font style=&quot;font-size:9px&quot;&gt;clean sentences&lt;/font&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="audio_proc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6d0de;strokeColor=#996185;fontSize=11;arcSize=10;" value="&lt;b&gt;Audio Processing&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;NumPy + soundfile&lt;br&gt;&lt;i&gt;audio_to_wav_bytes()&lt;br&gt;audio_to_base64()&lt;/i&gt;&lt;br&gt;24kHz PCM_16 WAV&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="160" x="633" y="685" as="geometry" />
+        </mxCell>
+        <mxCell id="e_gen_audio" edge="1" parent="1" source="gen_functions" style="rounded=1;strokeColor=#996185;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="audio_proc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_audio_sio" edge="1" parent="1" source="audio_proc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#b85450;strokeWidth=2;dashed=1;dashPattern=8 4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.75;entryY=1;entryDx=0;entryDy=0;" target="socketio_app" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="793" y="718" />
+              <mxPoint x="1174" y="718" />
+              <mxPoint x="1174" y="345" />
+              <mxPoint x="385" y="345" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_audio_sio_label" connectable="0" parent="e_audio_sio" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size:9px&quot;&gt;sio.emit(&amp;#39;audio_stream&amp;#39;)&lt;br&gt;WAV bytes / base64&lt;/font&gt;" vertex="1">
+          <mxGeometry relative="1" x="0.15" as="geometry">
+            <mxPoint x="-35" y="-1" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="bge_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;fontSize=11;arcSize=6;dashed=1;dashPattern=8 4;" value="BGE-M3 Boundary Detector (Optional)" vertex="1">
+          <mxGeometry height="115" width="310" x="850" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="bge_detector" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="&lt;b&gt;APIBased&lt;br&gt;BGEBoundaryDetector&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Semantic completion&lt;br&gt;confidence scoring&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="135" x="865" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="bge_buffer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="&lt;b&gt;APIStreaming&lt;br&gt;SentenceBuffer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Per-client semantic&lt;br&gt;buffering&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="130" x="1015" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="e_bge_det_buf" edge="1" parent="1" source="bge_detector" style="rounded=1;strokeColor=#6c8ebf;strokeWidth=1.5;entryX=0;entryY=0.5;entryDx=0;entryDy=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="bge_buffer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="flag_service" parent="1" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=11;size=20;" value="&lt;b&gt;FlagEmbedding Service&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;BGE-M3 Embeddings API&lt;br&gt;http://flagembedding:8000&lt;br&gt;&lt;i&gt;/embed  /rerank  /health&lt;/i&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="90" width="220" x="959" y="798" as="geometry" />
+        </mxCell>
+        <mxCell id="bge_api_client" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="&lt;b&gt;FlagEmbedding&lt;br&gt;APIClient&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;aiohttp + conn pool&lt;/font&gt;" vertex="1">
+          <mxGeometry height="55" width="110" x="754" y="815.5" as="geometry" />
+        </mxCell>
+        <mxCell id="e_bge_api" edge="1" parent="1" source="bge_detector" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#6c8ebf;strokeWidth=1.5;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="bge_api_client">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="933" y="782" />
+              <mxPoint x="809" y="782" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_api_flag" edge="1" parent="1" source="bge_api_client" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666666;strokeWidth=1.5;dashed=1;" target="flag_service">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_api_flag_label" connectable="0" parent="e_api_flag" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="&lt;font style=&quot;font-size:9px&quot;&gt;HTTP/JSON&lt;/font&gt;" vertex="1">
+          <mxGeometry relative="1" x="-0.1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="config_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=11;arcSize=6;dashed=1;fontColor=#333333;" value="Configuration" vertex="1">
+          <mxGeometry height="120" width="88" x="30" y="665" as="geometry" />
+        </mxCell>
+        <mxCell id="config_file" parent="1" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=0.15;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=9;" value="&lt;b&gt;tts.server.&lt;br&gt;settings.json&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:8px&quot;&gt;host, port&lt;br&gt;TTS defaults&lt;br&gt;FlagEmbedding&lt;/font&gt;" vertex="1">
+          <mxGeometry height="95" width="85" x="30" y="518" as="geometry" />
+        </mxCell>
+        <mxCell id="e_config_tts" edge="1" parent="1" source="config_file" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666666;strokeWidth=1;dashed=1;exitX=0.525;exitY=0.912;exitDx=0;exitDy=0;exitPerimeter=0;" target="tts_engine_group">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="73" y="605" />
+              <mxPoint x="73" y="643" />
+              <mxPoint x="360" y="643" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_config_uvicorn" edge="1" parent="1" source="config_file" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666666;strokeWidth=1;dashed=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="uvicorn">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="73" y="489" />
+              <mxPoint x="153" y="489" />
+              <mxPoint x="153" y="231" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_config_bge" edge="1" parent="1" source="config_file" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#666666;strokeWidth=1;dashed=1;exitX=1;exitY=0.7;exitDx=0;exitDy=0;" target="bge_group">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="gpu" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#f0f0f0;strokeColor=#999999;fontSize=11;size=20;" value="&lt;b&gt;NVIDIA GPU&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;PyTorch / CUDA&lt;br&gt;Model inference&lt;/font&gt;" vertex="1">
+          <mxGeometry height="65" width="170" x="260" y="823" as="geometry" />
+        </mxCell>
+        <mxCell id="e_kpipe_gpu" edge="1" parent="1" source="kpipeline" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor=#999999;strokeWidth=1.5;dashed=1;" target="gpu">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="0So0dZkpEieXXnej2a7X-1" connectable="0" parent="1" style="group" value="" vertex="1">
+          <mxGeometry height="110" width="130" x="30" y="805" as="geometry" />
+        </mxCell>
+        <mxCell id="docker_group" parent="0So0dZkpEieXXnej2a7X-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#999999;verticalAlign=top;fontStyle=1;fontSize=11;arcSize=6;dashed=1;" value="Docker Infrastructure" vertex="1">
+          <mxGeometry height="110" width="130" as="geometry" />
+        </mxCell>
+        <mxCell id="docker_compose" parent="0So0dZkpEieXXnej2a7X-1" style="shape=image;html=1;verticalAlign=top;verticalLabelPosition=bottom;labelBackgroundColor=default;imageAlign=center;imageAspect=0;image=img/lib/mscae/Docker.svg;fillColor=#f0f0f0;strokeColor=#999999;rounded=1;arcSize=8;whiteSpace=wrap;fontSize=10;" value="&lt;div&gt;&lt;b style=&quot;color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;docker-compose.yml&lt;/b&gt;&lt;/div&gt;&lt;font style=&quot;font-size:9px&quot;&gt;tts_server:1.0 container&lt;br&gt;NVIDIA GPU passthrough&lt;br&gt;logus2k_network (external)&lt;br&gt;Port 7700:7700&lt;/font&gt;" vertex="1">
+          <mxGeometry height="77.64705882352942" width="114.60526315789474" x="8.55263157894737" y="19.411764705882355" as="geometry" />
+        </mxCell>
+        <mxCell id="session_mgmt" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=11;arcSize=10;" value="&lt;b&gt;Client Session Manager&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:10px&quot;&gt;client_tts_sessions&lt;br&gt;audio_client_mapping&lt;br&gt;&lt;i&gt;voice, speed, mode, format&lt;/i&gt;&lt;/font&gt;" vertex="1">
+          <mxGeometry height="100" width="105" x="25" y="378.5" as="geometry" />
+        </mxCell>
+        <mxCell id="0So0dZkpEieXXnej2a7X-3" connectable="0" parent="1" style="group" value="" vertex="1">
+          <mxGeometry height="164" width="149" x="27" y="57" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#333333;verticalAlign=top;fontStyle=1;fontSize=11;arcSize=8;" value="&lt;b&gt;Legend&lt;/b&gt;" vertex="1">
+          <mxGeometry height="164" width="149" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" value="WebSocket (Socket.IO)" vertex="1">
+          <mxGeometry height="18.040000000000006" width="124.16666666666667" x="12.416666666666668" y="20.5" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" value="Text Processing (NLP)" vertex="1">
+          <mxGeometry height="18.040000000000006" width="124.16666666666667" x="12.416666666666668" y="43.460000000000015" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" value="TTS Engine / Server" vertex="1">
+          <mxGeometry height="18.040000000000006" width="124.16666666666667" x="12.416666666666668" y="66.42000000000002" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;" value="REST API Endpoints" vertex="1">
+          <mxGeometry height="18.040000000000006" width="124.16666666666667" x="12.416666666666668" y="89.38000000000002" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" value="Semantic Analysis (BGE)" vertex="1">
+          <mxGeometry height="18.040000000000006" width="124.16666666666667" x="12.416666666666668" y="112.34000000000003" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" parent="0So0dZkpEieXXnej2a7X-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6d0de;strokeColor=#996185;fontSize=9;" value="Audio / Output" vertex="1">
+          <mxGeometry height="18.040000000000006" width="124.16666666666667" x="12.416666666666668" y="135.3" as="geometry" />
+        </mxCell>
+        <mxCell id="text_proc_group" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;fontStyle=1;fontSize=12;arcSize=6;dashed=1;" value="Text Processing Pipeline" vertex="1">
+          <mxGeometry height="115" width="660" x="130" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="text_buffer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="&lt;b&gt;Per-Client&lt;br&gt;Text Buffer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;_tts_buffers&lt;br&gt;_append_stream()&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="120" x="145" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="spacy_sent" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="&lt;b&gt;spaCy&lt;br&gt;Sentencizer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Rule-based sentence&lt;br&gt;boundary detection&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="130" x="290" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="idle_flush" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="&lt;b&gt;Idle-Timeout&lt;br&gt;Flush&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Word-safe timeout&lt;br&gt;flush logic&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="110" x="445" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="sacremoses" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="&lt;b&gt;Sacremoses&lt;br&gt;Detokenizer&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:9px&quot;&gt;Linguistic cleanup&lt;br&gt;(EN / PT)&lt;/font&gt;" vertex="1">
+          <mxGeometry height="70" width="120" x="580" y="540" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

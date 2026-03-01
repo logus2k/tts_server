@@ -1,0 +1,24 @@
+{
+  "host": "0.0.0.0",
+  "port": 7700,
+  "log_level": "info",
+  "access_log": false,
+  "reload": false,
+  "model_path": "models/parler-tts",
+  "t5_path": "models/flan-t5-large",
+  "TTS": {
+    "default_voice": "Jon",
+    "default_speed": 1.0,
+    "enabled_languages": ["en", "fr", "es", "pt", "pl", "de", "it", "nl"],
+    "pipeline_timeout": 300,
+    "max_sentence_length": 1500,
+    "chunk_limit": 500,
+    "chunk_timeout": 10.0,
+    "generation_timeout": 60.0,
+    "speed_min": 0.5,
+    "speed_max": 1.5,
+    "output_sample_rate": 24000,
+    "buffer_idle_timeout": 0.25,
+    "treat_newline_as_boundary": true
+  }
+}
