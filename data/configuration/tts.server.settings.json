@@ -19,7 +19,7 @@
 			"p"
 		],
 		"pipeline_timeout": 300,
-		"max_sentence_length": 180,
+		"max_sentence_length": 1500,
 		"chunk_limit": 40,
 		"chunk_timeout": 3.0,
 		"generation_timeout": 25.0,
