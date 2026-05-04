@@ -456,50 +456,79 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
         
         cleaned_sentence = sentence.strip()
         logger.info(f"🎵 Generating TTS: {cleaned_sentence[:50]}... (voice: {voice}, lang: {lang_code}, speed: {validated_speed})")
-        
+
         loop = asyncio.get_event_loop()
         generation_timeout = tts_settings.get('generation_timeout', 25.0) if tts_settings else 25.0
-        
+
+        # Timing instrumentation: T0 = entry to pipeline call, T1 = pipeline()
+        # returned (just generator object setup, should be ~ms if Kokoro
+        # uses a true Python generator), T_first = first chunk yielded
+        # back to caller (= Kokoro's first-audio latency), T_done = all
+        # chunks done. Per-chunk gen times also logged so we can see if
+        # Kokoro emits one big chunk per sentence (no streaming win) or
+        # multiple smaller chunks.
+        t0 = time.time()
+
         generator = await asyncio.wait_for(
             loop.run_in_executor(None, lambda: pipeline(cleaned_sentence, voice=voice, speed=validated_speed, split_pattern=r"\n+")),
             timeout=generation_timeout
         )
-        
+
+        t1 = time.time()
+        logger.info(f"⏱️  T_pipeline_setup={t1-t0:.3f}s ({cleaned_sentence[:30]}...)")
+
         chunk_count = 0
         total_duration = 0
         chunk_limit = tts_settings.get('chunk_limit', 40) if tts_settings else 40
         chunk_timeout = tts_settings.get('chunk_timeout', 3.0) if tts_settings else 3.0
-        
-        for i, chunk_data in enumerate(generator):
-            if i >= chunk_limit:  # Limit chunks
+
+        # Drive the generator with `next` in an executor so each chunk's
+        # generation runs in a thread instead of blocking the asyncio
+        # event loop. Without this, the for-loop's sync next(generator)
+        # call would block other coroutines (other clients' TTS, the
+        # Socket.IO emit pump) for the duration of each chunk's compute.
+        # We sentinel-pass `None` so an exhausted generator returns None
+        # instead of raising StopIteration through the executor.
+        i = 0
+        while i < chunk_limit:
+            t_chunk_start = time.time()
+            try:
+                chunk_data = await loop.run_in_executor(None, next, generator, None)
+            except Exception as gen_err:
+                logger.error(f"Generator next() error: {gen_err}")
                 break
-                
+            if chunk_data is None:
+                break
+            t_chunk_gen = time.time() - t_chunk_start
+
             try:
                 if hasattr(chunk_data, 'output') and hasattr(chunk_data.output, 'audio'):
                     audio = chunk_data.output.audio
-                    
+
                     if hasattr(audio, 'cpu'):
                         audio_np = audio.cpu().detach().numpy().astype(np.float32)
                     else:
                         audio_np = np.array(audio, dtype=np.float32)
-                    
+
                     if audio_np.ndim > 1:
                         audio_np = audio_np.flatten()
-                    
+
                     if len(audio_np) == 0:
+                        i += 1
                         continue
-                    
+
                     wav_bytes = await asyncio.wait_for(
                         loop.run_in_executor(None, audio_to_wav_bytes, audio_np, 24000),
                         timeout=chunk_timeout
                     )
-                    
+
                     if not wav_bytes:
+                        i += 1
                         continue
-                    
+
                     chunk_duration = len(audio_np) / 24000
                     total_duration += chunk_duration
-                    
+
                     metadata = {
                         'type': 'tts_audio_chunk',
                         'sentence_text': cleaned_sentence[:100],
@@ -514,15 +543,20 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
                         'format': 'binary',
                         'timestamp': datetime.now().isoformat()
                     }
-                    
+
+                    if chunk_count == 0:
+                        logger.info(f"⏱️  T_first_chunk={time.time()-t0:.3f}s gen={t_chunk_gen:.3f}s audio={chunk_duration:.2f}s ({cleaned_sentence[:30]}...)")
+                    else:
+                        logger.info(f"⏱️  chunk_{chunk_count}_gen={t_chunk_gen:.3f}s audio={chunk_duration:.2f}s")
+
                     yield metadata, wav_bytes
                     chunk_count += 1
                     await asyncio.sleep(0.005)
-                    
+
             except Exception as e:
                 logger.error(f"Chunk processing error: {e}")
-                continue
-        
+            i += 1
+
         # Completion
         completion = {
             'type': 'tts_sentence_complete',
@@ -536,8 +570,8 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
             'format': 'binary',
             'timestamp': datetime.now().isoformat()
         }
-        
-        logger.info(f"🎵 TTS completed: {chunk_count} chunks, {total_duration:.2f}s (voice: {voice}, lang: {lang_code}, speed: {validated_speed})")
+
+        logger.info(f"🎵 TTS completed: {chunk_count} chunks, {total_duration:.2f}s audio in {time.time()-t0:.3f}s wall (voice: {voice}, lang: {lang_code}, speed: {validated_speed})")
         yield completion, None
         
     except Exception as e:
