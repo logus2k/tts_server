@@ -20,7 +20,9 @@ import numpy as np
 import soundfile as sf
 from fastapi import FastAPI
 import socketio
-from kokoro import KPipeline
+from kokoro import KPipeline, KModel
+import torch
+import threading
 import uvicorn
 from contextlib import asynccontextmanager
 import urllib.parse
@@ -38,6 +40,23 @@ logger = logging.getLogger(__name__)
 # Global variables
 tts_pipelines: Dict[str, Optional[KPipeline]] = {}
 tts_settings = None
+
+# Shared Kokoro acoustic model. The 82M KModel is language-agnostic, so every
+# per-language KPipeline can share ONE instance instead of each loading its own
+# ~333 MB copy on the GPU. Keeps instant multi-language switching while cutting
+# GPU use from ~333 MB * N_languages down to ~333 MB total.
+_shared_kmodel: Optional[KModel] = None
+_kmodel_lock = threading.Lock()
+
+def _get_shared_kmodel() -> KModel:
+    global _shared_kmodel
+    if _shared_kmodel is None:
+        with _kmodel_lock:
+            if _shared_kmodel is None:
+                dev = "cuda" if torch.cuda.is_available() else "cpu"
+                _shared_kmodel = KModel().to(dev).eval()
+                logger.info(f"✅ Loaded shared Kokoro KModel on {dev}")
+    return _shared_kmodel
 
 # Voice-to-Language mapping (based on official Kokoro documentation)
 VOICE_LANGUAGE_MAP = {
@@ -272,7 +291,7 @@ async def initialize_pipeline_for_language(lang_code: str) -> Optional[KPipeline
         timeout = tts_settings.get('pipeline_timeout', 300) if tts_settings else 300
         
         pipeline = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: KPipeline(lang_code=lang_code)),
+            loop.run_in_executor(None, lambda: KPipeline(lang_code=lang_code, model=_get_shared_kmodel())),
             timeout=timeout
         )
         logger.info(f"✅ TTS pipeline initialized for {lang_code}")
@@ -798,6 +817,10 @@ async def set_client_mode(sid, data):
         'timestamp': datetime.now().isoformat()
     }, room=sid)
 
+    # ACK so sio.call() resolves on completion (same reason as in
+    # register_audio_client above).
+    return True
+
 @sio.event
 async def disconnect(sid):
     """Handle client disconnection"""
@@ -884,6 +907,13 @@ async def register_audio_client(sid, data):
     }
 
     logger.info(f"FINAL SESSION: {sid} -> {client_tts_sessions.get(sid, 'NOT_FOUND')}")
+
+    # ACK so Socket.IO sio.call() on the caller side resolves
+    # immediately on completion instead of timing out. Lets avatar_server
+    # wait for actual registration before signalling tts_ready to the
+    # browser; without this ack, the call() always times out (5 s) and
+    # the widget races ahead of the audio_client_mapping update.
+    return True
 
 
 
