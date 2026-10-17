@@ -18,7 +18,10 @@ from datetime import datetime
 import time
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
+import gc
+import hmac
+import os
 import socketio
 from kokoro import KPipeline, KModel
 import torch
@@ -354,6 +357,133 @@ def is_voice_enabled(voice: str) -> bool:
     enabled_languages = get_enabled_languages()
     return lang_code in enabled_languages
 
+# ── the GPU on request (README "Releasing the GPU") ──────────────────────────────────────────────────────────
+# Another application (Cortex, ingesting documents) may ask for the card's memory back. Released, the shared KModel
+# waits in host memory (measured 2026-10-16: back in 0.32 s); a synthesis that arrives meanwhile brings it back first
+# and is served, never refused. A release waits for the syntheses in flight and is a lease: when it lapses the model
+# comes back by itself, so a caller that died cannot leave it away.
+_gpu = {"state": "loaded", "active": 0, "releasing": False, "lease": {"until": None, "reason": "", "by": ""}}
+_gpu_cond: Optional[asyncio.Condition] = None
+
+
+def _cond() -> asyncio.Condition:
+    global _gpu_cond
+    if _gpu_cond is None:
+        _gpu_cond = asyncio.Condition()
+    return _gpu_cond
+
+
+def _model_to(device: str) -> float:
+    t = time.time()
+    if _shared_kmodel is not None:
+        _shared_kmodel.to(device)
+        if device == "cpu":
+            # weight_norm keeps each layer's computed weight as a plain attribute, which .to() leaves on the GPU
+            # (89 tensors, 225 MB: measured 2026-10-16); its hook recomputes it on the next forward anyway
+            for m in _shared_kmodel.modules():
+                w = m.__dict__.get("weight")
+                if torch.is_tensor(w) and "weight" not in m._parameters and w.device.type != "cpu":
+                    m.__dict__["weight"] = w.to("cpu")
+            gc.collect()
+            torch.cuda.empty_cache()
+    return time.time() - t
+
+
+@asynccontextmanager
+async def _gpu_use():
+    """Around one synthesis: waits out a release in progress, brings a released model back, counts itself."""
+    cond = _cond()
+    async with cond:
+        await cond.wait_for(lambda: not _gpu["releasing"])
+        if _gpu["state"] == "released":
+            dt = await asyncio.get_event_loop().run_in_executor(None, _model_to, "cuda")
+            _gpu["state"] = "loaded"
+            logger.info(f"🎛️ GPU: model back on the GPU for a request ({dt:.2f} s); lease of "
+                        f"{_gpu['lease']['by'] or '?'} still open until it is renewed or lapses")
+        _gpu["active"] += 1
+    try:
+        yield
+    finally:
+        async with cond:
+            _gpu["active"] -= 1
+            cond.notify_all()
+
+
+async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id: str):
+    async with _gpu_use():
+        async for item in _generate_tts_binary(sentence, voice, speed, client_id):
+            yield item
+
+
+async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id: str) -> AsyncGenerator[dict, None]:
+    async with _gpu_use():
+        async for item in _generate_tts_base64(sentence, voice, speed, client_id):
+            yield item
+
+
+def _gpu_state() -> dict:
+    until = _gpu["lease"]["until"]
+    cuda = torch.cuda.is_available()
+    return {"state": _gpu["state"], "device": "cuda" if cuda else "cpu", "active": _gpu["active"],
+            "lease": {**_gpu["lease"], "seconds_left": max(0, round(until - time.time())) if until else None},
+            "gpu_mib": torch.cuda.memory_reserved() // 2**20 if cuda else 0}
+
+
+async def release_gpu(reason: str, minutes: float, by: str) -> dict:
+    minutes = max(1.0, min(120.0, float(minutes or 10)))
+    cond = _cond()
+    async with cond:
+        await cond.wait_for(lambda: not _gpu["releasing"])
+        _gpu["releasing"] = True
+        try:
+            try:
+                await asyncio.wait_for(cond.wait_for(lambda: _gpu["active"] == 0), timeout=60)
+            except asyncio.TimeoutError:
+                return {"ok": False, "error": "syntheses held the GPU for over 60 s", **_gpu_state()}
+            cuda = torch.cuda.is_available()
+            before = torch.cuda.memory_reserved() if cuda else 0
+            if _gpu["state"] == "loaded" and cuda:
+                await asyncio.get_event_loop().run_in_executor(None, _model_to, "cpu")
+                _gpu["state"] = "released"
+            _gpu["lease"] = {"until": time.time() + minutes * 60, "reason": str(reason)[:100], "by": str(by)[:60]}
+            freed = (before - torch.cuda.memory_reserved()) // 2**20 if cuda else 0
+        finally:
+            _gpu["releasing"] = False
+            cond.notify_all()
+    logger.info(f"🎛️ GPU released for {_gpu['lease']['by'] or '?'} ({_gpu['lease']['reason'] or 'no reason'}), "
+                f"{minutes:g} min, freed {freed} MiB")
+    return {"ok": True, "freed_mib": freed, **_gpu_state()}
+
+
+async def load_gpu(why: str = "asked") -> dict:
+    cond = _cond()
+    async with cond:
+        await cond.wait_for(lambda: not _gpu["releasing"])
+        if _gpu["state"] == "released":
+            await asyncio.get_event_loop().run_in_executor(None, _model_to, "cuda")
+            _gpu["state"] = "loaded"
+            logger.info(f"🎛️ GPU: model back ({why})")
+        _gpu["lease"] = {"until": None, "reason": "", "by": ""}
+    return {"ok": True, **_gpu_state()}
+
+
+async def _lease_watch() -> None:
+    while True:
+        await asyncio.sleep(10)
+        until = _gpu["lease"]["until"]
+        if until and time.time() > until:
+            await load_gpu("the lease lapsed")
+
+
+def _admin(secret: Optional[str]) -> None:
+    """X-Admin-Secret = SPEECH_ADMIN_SECRET (the service's .env); unset, there are no admin routes."""
+    want = os.environ.get("SPEECH_ADMIN_SECRET", "")
+    if not want:
+        raise HTTPException(404, "not found")
+    if not hmac.compare_digest(secret or "", want):
+        raise HTTPException(403, "wrong or missing X-Admin-Secret")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
@@ -366,8 +496,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ TTS initialization failed: {e}")
         logger.warning("⚠️ TTS functionality may be limited")
     
+    watch = asyncio.create_task(_lease_watch())
     yield
-    
+    watch.cancel()
     logger.info("Shutting down...")
 
 # Create Socket.IO server
@@ -442,7 +573,7 @@ def audio_to_wav_bytes(audio_data: np.ndarray, sample_rate: int = 24000) -> byte
         logger.error(f"WAV conversion error: {e}")
         return b""
 
-async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id: str):
+async def _generate_tts_binary(sentence: str, voice: str, speed: float, client_id: str):
     """Generate TTS audio in binary format with language-specific pipeline and dynamic speed"""
     try:
         pipeline = get_pipeline_for_voice(voice)
@@ -608,7 +739,7 @@ async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id
         }
         yield error_data, None
 
-async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id: str) -> AsyncGenerator[dict, None]:
+async def _generate_tts_base64(sentence: str, voice: str, speed: float, client_id: str) -> AsyncGenerator[dict, None]:
     """Generate TTS audio in base64 format with language-specific pipeline and dynamic speed"""
     try:
         pipeline = get_pipeline_for_voice(voice)
@@ -1363,6 +1494,29 @@ async def cleanup_stale_buffers():
         await asyncio.sleep(20)
 
 # Health check with language status
+@app.get("/admin/state")
+async def admin_state(x_admin_secret: Optional[str] = Header(None)):
+    _admin(x_admin_secret)
+    return _gpu_state()
+
+
+@app.post("/admin/release")
+async def admin_release(request: Request, x_admin_secret: Optional[str] = Header(None)):
+    """{reason, minutes (1-120, default 10), by}: the model to host memory; again = the lease renewed."""
+    _admin(x_admin_secret)
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - no body: the defaults
+        body = {}
+    return await release_gpu(body.get("reason", ""), body.get("minutes", 10), body.get("by", ""))
+
+
+@app.post("/admin/load")
+async def admin_load(x_admin_secret: Optional[str] = Header(None)):
+    _admin(x_admin_secret)
+    return await load_gpu("asked")
+
+
 @app.get("/health")
 async def health_check():
     pipeline_status = {}

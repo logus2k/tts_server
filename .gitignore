@@ -5,3 +5,4 @@ lib64
 include/
 share/
 *.mp3
+.env

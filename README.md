@@ -117,3 +117,29 @@ Clients communicate with the server using the following Socket.IO events:
 This project is licensed under the **Apache License 2.0**.
 
 ---
+
+## Releasing the GPU
+
+Another application may ask for the card's memory back for a while (Cortex does while it ingests documents, when its
+setting *Free the speech services' GPU during document ingestion* is on). Released, the shared Kokoro model (≈0.6 GB of the card; back in 0.3 s) waits in host memory. The
+service keeps running: a sentence to speak that arrives meanwhile brings the model back first and is served, slower by that reload,
+never refused. A release is a **lease**: it lapses after `minutes` (1-120, default 10) and the model comes back by
+itself, so a caller that died cannot leave it away; releasing again renews it.
+
+| Route | What |
+| --- | --- |
+| `POST /admin/release` `{"reason", "minutes", "by"}` | waits for the work in flight, moves the model to host memory, answers `{state, freed_mib, lease, gpu_mib}` |
+| `POST /admin/load` | the model back now; the lease closed |
+| `GET /admin/state` | `{state: loaded\|released, lease: {until, reason, by, seconds_left}, gpu_mib}` |
+
+Every route needs the header `X-Admin-Secret` equal to `SPEECH_ADMIN_SECRET`, which `docker-compose.yml` reads
+from `./.env` (git-ignored; generate one with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`).
+Without it the routes do not exist (404). Give the same value to the caller (Cortex: `CORTEX_TTS_ADMIN_SECRET`
+in its `.env`, upper case). Port 7700 is published on the host: the secret is what protects the routes.
+
+Check against the running service (about 2 minutes; it leaves the model loaded):
+
+```bash
+set -a; . ./.env; set +a
+docker run --rm --network logus2k_network -e SPEECH_ADMIN_SECRET -v "$PWD/tests:/t:ro" --entrypoint python cortex:0.2 /t/release_check.py
+```
