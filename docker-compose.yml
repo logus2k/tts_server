@@ -10,6 +10,9 @@ services:
     environment:
       # the admin routes (README "Releasing the GPU"); unset = none. Kept in ./.env (git-ignored)
       - SPEECH_ADMIN_SECRET=${SPEECH_ADMIN_SECRET:-}
+      # the European Portuguese voice (pt_tuga, /synthesize): weights copied from the HF cache of logus2k/kokoro_tts_eu_pt into data/eu_pt (git-ignored)
+      - TTS_EU_PT_MODEL=/tts_server/data/eu_pt/tuga_kokoro.pth
+      - TTS_EU_PT_VOICEPACK=/tts_server/data/eu_pt/tuga_voicepack.pt
     deploy:
       resources:
         reservations:

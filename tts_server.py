@@ -18,7 +18,7 @@ from datetime import datetime
 import time
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 import gc
 import hmac
 import os
@@ -135,6 +135,26 @@ VOICE_LANGUAGE_MAP = {
     'pm_alex': 'p',         # 🚹
     'pm_santa': 'p',        # 🚹
 }
+
+# European Portuguese (pt-PT): the tts_eu_pt package (Kokoro-82M fine-tuned, TugaPhone G2P, Apache-2.0), on the CPU so
+# it costs no VRAM; weights in data/eu_pt (TTS_EU_PT_MODEL / TTS_EU_PT_VOICEPACK). One voice: pt_tuga. Used by
+# /synthesize (Cortex's Movie narration); the socket.io stream keeps Kokoro's own pipelines.
+EU_PT_VOICES = {"pt_tuga"}
+_eu_pt = None
+_eu_pt_lock = threading.Lock()
+
+
+def _eu_pt_tts():
+    global _eu_pt
+    with _eu_pt_lock:
+        if _eu_pt is None:
+            from tts_eu_pt import TTS as EuPtTTS
+            t0 = time.time()
+            _eu_pt = EuPtTTS(device="cpu", model_path=os.environ.get("TTS_EU_PT_MODEL") or None,
+                             voicepack_path=os.environ.get("TTS_EU_PT_VOICEPACK") or None)
+            logger.info(f"🇵🇹 tts_eu_pt (pt-PT, CPU) ready in {time.time() - t0:.1f}s")
+        return _eu_pt
+
 
 # Language code definitions (based on official Kokoro documentation)
 SUPPORTED_LANGUAGES = {
@@ -1515,6 +1535,61 @@ async def admin_release(request: Request, x_admin_secret: Optional[str] = Header
 async def admin_load(x_admin_secret: Optional[str] = Header(None)):
     _admin(x_admin_secret)
     return await load_gpu("asked")
+
+
+@app.post("/synthesize")
+async def synthesize(request: Request):
+    """{text, voice, speed} -> one WAV (24 kHz mono PCM16) of the whole text, for a file (Cortex's Movie channel
+    narration). The same pipelines as the socket.io stream; the GPU use counted like a stream's."""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001
+        body = {}
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    voice = str(body.get("voice") or "af_heart")
+    try:
+        speed = max(0.5, min(2.0, float(body.get("speed") or 1.0)))
+    except (TypeError, ValueError):
+        speed = 1.0
+    if voice in EU_PT_VOICES:
+        loop = asyncio.get_running_loop()
+        try:
+            audio_np = await loop.run_in_executor(None, lambda: _eu_pt_tts().say(text, speed=speed))
+        except ImportError as e:
+            raise HTTPException(status_code=503, detail=f"the European Portuguese voice is not installed: {e}")
+        audio_np = np.asarray(audio_np, dtype=np.float32).flatten()
+        if not len(audio_np):
+            raise HTTPException(status_code=500, detail="no audio produced")
+        return Response(content=audio_to_wav_bytes(audio_np, 24000), media_type="audio/wav",
+                        headers={"X-Duration-Seconds": f"{len(audio_np) / 24000:.3f}", "X-Voice": voice})
+    if voice not in VOICE_LANGUAGE_MAP:
+        raise HTTPException(status_code=400, detail=f"unknown voice {voice}")
+    pipeline = get_pipeline_for_voice(voice)
+    if pipeline is None:
+        lang = get_language_for_voice(voice)
+        pipeline = await initialize_pipeline_for_language(lang)
+        if pipeline is None:
+            raise HTTPException(status_code=503, detail=f"no pipeline for voice {voice}")
+    loop = asyncio.get_running_loop()
+    parts: list[np.ndarray] = []
+    async with _gpu_use():
+        generator = await loop.run_in_executor(None, lambda: pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+"))
+        for chunk_data in generator:
+            audio = getattr(getattr(chunk_data, "output", None), "audio", None)
+            if audio is None:
+                continue
+            audio_np = audio.cpu().detach().numpy().astype(np.float32) if hasattr(audio, "cpu") else np.array(audio, dtype=np.float32)
+            if audio_np.ndim > 1:
+                audio_np = audio_np.flatten()
+            if len(audio_np):
+                parts.append(audio_np)
+    if not parts:
+        raise HTTPException(status_code=500, detail="no audio produced")
+    wav = audio_to_wav_bytes(np.concatenate(parts), 24000)
+    return Response(content=wav, media_type="audio/wav",
+                    headers={"X-Duration-Seconds": f"{sum(len(p) for p in parts) / 24000:.3f}"})
 
 
 @app.get("/health")

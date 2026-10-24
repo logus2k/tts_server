@@ -118,6 +118,23 @@ This project is licensed under the **Apache License 2.0**.
 
 ---
 
+## One file from a text: `POST /synthesize`
+
+`{"text", "voice", "speed"}` → one WAV (24 kHz mono PCM16) of the whole text, with `X-Duration-Seconds`. Added for
+Cortex's Movie narration (2026-10-23); the socket.io stream above stays the way to speak live. An unknown voice is a
+400. Voices are Kokoro's (`VOICE_LANGUAGE_MAP`) plus:
+
+### European Portuguese: `pt_tuga`
+
+Kokoro's own Portuguese is Brazilian (`pf_dora`, `pm_alex`, `pm_santa`). `pt_tuga` is the **European Portuguese**
+voice of the `tts_eu_pt` package (Kokoro-82M fine-tuned by the author, TugaPhone G2P for the Lisbon lect, Apache-2.0;
+`~/env/assets/tts_eu_pt`, PyPI `tts_eu_pt`), installed in the image (`tts_server.Dockerfile`) and run on the **CPU**,
+so it costs no VRAM and is not part of the GPU lease below. Its weights (313 MB) are not in git: copy them from the
+Hugging Face cache of `logus2k/kokoro_tts_eu_pt` (`tuga_kokoro.pth`, `tuga_voicepack.pt`) into `data/eu_pt/`
+(git-ignored; `docker-compose.yml` names them in `TTS_EU_PT_MODEL` / `TTS_EU_PT_VOICEPACK`). Measured: a 20-word
+sentence in 0.2 s after a 0.5 s first load. Only `/synthesize` offers it for now; the live stream's voice list is
+Kokoro's.
+
 ## Releasing the GPU
 
 Another application may ask for the card's memory back for a while (Cortex does while it ingests documents, when its
