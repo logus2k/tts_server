@@ -13,6 +13,10 @@ services:
       # the European Portuguese voice (pt_tuga, /synthesize): weights copied from the HF cache of logus2k/kokoro_tts_eu_pt into data/eu_pt (git-ignored)
       - TTS_EU_PT_MODEL=/tts_server/data/eu_pt/tuga_kokoro.pth
       - TTS_EU_PT_VOICEPACK=/tts_server/data/eu_pt/tuga_voicepack.pt
+      # PRIVATE pt-PT pronunciations from Infopédia (© Porto Editora) for words tugalex lacks: internal use only, not to
+      # be published before Porto Editora's permission (tts_eu_pt open issue 5). Built by tts_eu_pt's
+      # scripts/build_extra_lexicon.py into data/eu_pt (git-ignored). Remove this line to switch it off.
+      - TTS_EU_PT_EXTRA_LEXICON=/tts_server/data/eu_pt/extra_lexicon_ptpt.tsv
     deploy:
       resources:
         reservations:
