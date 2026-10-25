@@ -9,3 +9,10 @@ share/
 
 # the European Portuguese voice (313 MB; copied from the HF cache of logus2k/kokoro_tts_eu_pt): never in git
 data/eu_pt/
+
+# local clutter: never in git
+__pycache__/
+*.pyc
+pyvenv.cfg
+*.bkp
+*.bak*
