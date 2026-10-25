@@ -137,23 +137,31 @@ VOICE_LANGUAGE_MAP = {
 }
 
 # European Portuguese (pt-PT): the tts_eu_pt package (Kokoro-82M fine-tuned, TugaPhone G2P, Apache-2.0), on the CPU so
-# it costs no VRAM; weights in data/eu_pt (TTS_EU_PT_MODEL / TTS_EU_PT_VOICEPACK). One voice: pt_tuga. Used by
-# /synthesize (Cortex's Movie narration); the socket.io stream keeps Kokoro's own pipelines.
-EU_PT_VOICES = {"pt_tuga"}
-_eu_pt = None
+# it costs no VRAM; weights in data/eu_pt (TTS_EU_PT_MODEL, TTS_EU_PT_VOICEPACK, TTS_EU_PT_JOAO_VOICEPACK). Two voices on
+# one loaded model: pt_ana (female) and pt_joao (male), each with its tuning from tts_eu_pt.VOICE_PRESETS (pt_tuga, the
+# single voice up to 0.1.21, is gone). Used by /synthesize (Cortex's Movie narration); the socket.io stream keeps
+# Kokoro's own pipelines.
+EU_PT_VOICES = {"pt_ana": ("ana", "Ana", "F"), "pt_joao": ("joao", "João", "M")}
+_eu_pt = {}
 _eu_pt_lock = threading.Lock()
 
 
-def _eu_pt_tts():
-    global _eu_pt
+def _eu_pt_tts(voice: str = "pt_ana"):
     with _eu_pt_lock:
-        if _eu_pt is None:
-            from tts_eu_pt import TTS as EuPtTTS
+        if not _eu_pt:
+            from tts_eu_pt import TTS as EuPtTTS, VOICE_PRESETS
             t0 = time.time()
-            _eu_pt = EuPtTTS(device="cpu", model_path=os.environ.get("TTS_EU_PT_MODEL") or None,
-                             voicepack_path=os.environ.get("TTS_EU_PT_VOICEPACK") or None)
-            logger.info(f"🇵🇹 tts_eu_pt (pt-PT, CPU) ready in {time.time() - t0:.1f}s")
-        return _eu_pt
+            ana = EuPtTTS(device="cpu", model_path=os.environ.get("TTS_EU_PT_MODEL") or None,
+                          voicepack_path=os.environ.get("TTS_EU_PT_VOICEPACK") or None, **VOICE_PRESETS["ana"])
+            _eu_pt["ana"] = ana
+            joao = os.environ.get("TTS_EU_PT_JOAO_VOICEPACK")
+            if joao:
+                _eu_pt["joao"] = ana.with_voice(joao, **VOICE_PRESETS["joao"])
+            logger.info(f"🇵🇹 tts_eu_pt (pt-PT, CPU) ready in {time.time() - t0:.1f}s: {sorted(_eu_pt)}")
+        key = EU_PT_VOICES[voice][0]
+        if key not in _eu_pt:
+            raise ImportError(f"voice {voice} is not configured (TTS_EU_PT_JOAO_VOICEPACK)")
+        return _eu_pt[key]
 
 
 # Language code definitions (based on official Kokoro documentation)
@@ -1556,7 +1564,7 @@ async def synthesize(request: Request):
     if voice in EU_PT_VOICES:
         loop = asyncio.get_running_loop()
         try:
-            audio_np = await loop.run_in_executor(None, lambda: _eu_pt_tts().say(text, speed=speed))
+            audio_np = await loop.run_in_executor(None, lambda: _eu_pt_tts(voice).say(text, speed=speed))
         except ImportError as e:
             raise HTTPException(status_code=503, detail=f"the European Portuguese voice is not installed: {e}")
         audio_np = np.asarray(audio_np, dtype=np.float32).flatten()
@@ -1674,6 +1682,10 @@ async def get_voices():
             'enabled': voice_enabled
         })
     
+    for voice, (_, name, gender) in EU_PT_VOICES.items():          # /synthesize only, not the socket.io stream
+        voices_with_languages.append({'voice': voice, 'name': name, 'gender': gender, 'language_code': 'pt-PT',
+                                      'language_name': 'European Portuguese', 'available': True, 'enabled': True,
+                                      'endpoint': '/synthesize'})
     return {
         "voices": voices_with_languages,
         "total_voices": len(VOICE_LANGUAGE_MAP),

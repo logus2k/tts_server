@@ -124,16 +124,17 @@ This project is licensed under the **Apache License 2.0**.
 Cortex's Movie narration (2026-10-23); the socket.io stream above stays the way to speak live. An unknown voice is a
 400. Voices are Kokoro's (`VOICE_LANGUAGE_MAP`) plus:
 
-### European Portuguese: `pt_tuga`
+### European Portuguese: `pt_ana` and `pt_joao`
 
-Kokoro's own Portuguese is Brazilian (`pf_dora`, `pm_alex`, `pm_santa`). `pt_tuga` is the **European Portuguese**
-voice of the `tts_eu_pt` package (Kokoro-82M fine-tuned by the author, TugaPhone G2P for the Lisbon lect, Apache-2.0;
-`~/env/assets/tts_eu_pt`, PyPI `tts_eu_pt`), installed in the image (`tts_server.Dockerfile`) and run on the **CPU**,
-so it costs no VRAM and is not part of the GPU lease below. Its weights (313 MB) are not in git: copy them from the
-Hugging Face cache of `logus2k/kokoro_tts_eu_pt` (`tuga_kokoro.pth`, `tuga_voicepack.pt`) into `data/eu_pt/`
-(git-ignored; `docker-compose.yml` names them in `TTS_EU_PT_MODEL` / `TTS_EU_PT_VOICEPACK`). Measured: a 20-word
-sentence in 0.2 s after a 0.5 s first load. Only `/synthesize` offers it for now; the live stream's voice list is
-Kokoro's.
+Kokoro's own Portuguese is Brazilian (`pf_dora`, `pm_alex`, `pm_santa`). `pt_ana` (female) and `pt_joao` (male) are the
+**European Portuguese** voices of the `tts_eu_pt` package (Kokoro-82M fine-tuned by the author, TugaPhone G2P for the
+Lisbon lect, Apache-2.0; `~/env/assets/tts_eu_pt`), installed in the image (`tts_server.Dockerfile`) and run on the
+**CPU**, so they cost no VRAM and are not part of the GPU lease below. Both run on one loaded model, each with its own
+pace, pauses, bass and loudness (`tts_eu_pt.VOICE_PRESETS`; output at -16 LUFS). They replace `pt_tuga` (the single
+voice up to tts_eu_pt 0.1.21). The weights are not in git: `data/eu_pt/` (git-ignored) holds
+`tuga_kokoro.pth` (the model), `tuga_voicepack.pt` (Ana) and `joao_voicepack.pt` (João: the Tugão 1.0 speaker, CC0),
+named in `docker-compose.yml` (`TTS_EU_PT_MODEL`, `TTS_EU_PT_VOICEPACK`, `TTS_EU_PT_JOAO_VOICEPACK`). `/voices` lists
+both. Only `/synthesize` offers them; the live stream's voices are Kokoro's.
 
 ## Releasing the GPU
 
