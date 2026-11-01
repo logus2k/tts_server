@@ -137,11 +137,12 @@ VOICE_LANGUAGE_MAP = {
 }
 
 # European Portuguese (pt-PT): the tts_eu_pt package (Kokoro-82M fine-tuned, TugaPhone G2P, Apache-2.0), on the CPU so
-# it costs no VRAM; weights in data/eu_pt (TTS_EU_PT_MODEL, TTS_EU_PT_VOICEPACK, TTS_EU_PT_JOAO_VOICEPACK). Two voices on
-# one loaded model: pt_ana (female) and pt_joao (male), each with its tuning from tts_eu_pt.VOICE_PRESETS (pt_tuga, the
-# single voice up to 0.1.21, is gone). Used by /synthesize (Cortex's Movie narration); the socket.io stream keeps
-# Kokoro's own pipelines.
-EU_PT_VOICES = {"pt_ana": ("ana", "Ana", "F"), "pt_joao": ("joao", "João", "M")}
+# it costs no VRAM; weights in data/eu_pt (TTS_EU_PT_MODEL, TTS_EU_PT_VOICEPACK for Ana, TTS_EU_PT_<NAME>_VOICEPACK for
+# each other voice). Four voices on one loaded model (since tts_eu_pt 0.1.32, the licence-clean model, 2026-11-01): pt_ana
+# and pt_amelia (female), pt_joao and pt_rui (male), each with its tuning from tts_eu_pt.VOICE_PRESETS. Used by /synthesize
+# (Cortex's Movie narration); the socket.io stream keeps Kokoro's own pipelines.
+EU_PT_VOICES = {"pt_ana": ("ana", "Ana", "F"), "pt_joao": ("joao", "João", "M"),
+                "pt_amelia": ("amelia", "Amélia", "F"), "pt_rui": ("rui", "Rui", "M")}
 _eu_pt = {}
 _eu_pt_lock = threading.Lock()
 
@@ -154,13 +155,14 @@ def _eu_pt_tts(voice: str = "pt_ana"):
             ana = EuPtTTS(device="cpu", model_path=os.environ.get("TTS_EU_PT_MODEL") or None,
                           voicepack_path=os.environ.get("TTS_EU_PT_VOICEPACK") or None, **VOICE_PRESETS["ana"])
             _eu_pt["ana"] = ana
-            joao = os.environ.get("TTS_EU_PT_JOAO_VOICEPACK")
-            if joao:
-                _eu_pt["joao"] = ana.with_voice(joao, **VOICE_PRESETS["joao"])
+            for key, _, _ in EU_PT_VOICES.values():
+                pack = os.environ.get(f"TTS_EU_PT_{key.upper()}_VOICEPACK")
+                if key != "ana" and pack:
+                    _eu_pt[key] = ana.with_voice(pack, **VOICE_PRESETS[key])
             logger.info(f"🇵🇹 tts_eu_pt (pt-PT, CPU) ready in {time.time() - t0:.1f}s: {sorted(_eu_pt)}")
         key = EU_PT_VOICES[voice][0]
         if key not in _eu_pt:
-            raise ImportError(f"voice {voice} is not configured (TTS_EU_PT_JOAO_VOICEPACK)")
+            raise ImportError(f"voice {voice} is not configured (TTS_EU_PT_{key.upper()}_VOICEPACK)")
         return _eu_pt[key]
 
 

@@ -10,15 +10,14 @@ services:
     environment:
       # the admin routes (README "Releasing the GPU"); unset = none. Kept in ./.env (git-ignored)
       - SPEECH_ADMIN_SECRET=${SPEECH_ADMIN_SECRET:-}
-      # the European Portuguese voice (pt_tuga, /synthesize): weights copied from the HF cache of logus2k/kokoro_tts_eu_pt into data/eu_pt (git-ignored)
-      - TTS_EU_PT_MODEL=/tts_server/data/eu_pt/tuga_kokoro.pth
-      - TTS_EU_PT_VOICEPACK=/tts_server/data/eu_pt/tuga_voicepack.pt
-      # the male voice pt_joao: Kokoro-82M's own am_michael voicepack (Apache-2.0); the earlier Tugão profile is in data/eu_pt/backup_joao_tugao
+      # the European Portuguese voices (/synthesize), tts_eu_pt 0.1.32: the licence-clean model and the four voices the
+      # listener chose in the Voice Blender (2026-11-01), in data/eu_pt (git-ignored); the earlier voices are in
+      # data/eu_pt/backup_pre_clean_20261101
+      - TTS_EU_PT_MODEL=/tts_server/data/eu_pt/eu_pt_kokoro.pth
+      - TTS_EU_PT_VOICEPACK=/tts_server/data/eu_pt/ana_voicepack.pt
       - TTS_EU_PT_JOAO_VOICEPACK=/tts_server/data/eu_pt/joao_voicepack.pt
-      # PRIVATE pt-PT pronunciations from Infopédia (© Porto Editora) for words tugalex lacks: internal use only, not to
-      # be published before Porto Editora's permission (tts_eu_pt open issue 5). Built by tts_eu_pt's
-      # scripts/build_extra_lexicon.py into data/eu_pt (git-ignored). Remove this line to switch it off.
-      - TTS_EU_PT_EXTRA_LEXICON=/tts_server/data/eu_pt/extra_lexicon_ptpt.tsv
+      - TTS_EU_PT_AMELIA_VOICEPACK=/tts_server/data/eu_pt/amelia_voicepack.pt
+      - TTS_EU_PT_RUI_VOICEPACK=/tts_server/data/eu_pt/rui_voicepack.pt
     deploy:
       resources:
         reservations:
