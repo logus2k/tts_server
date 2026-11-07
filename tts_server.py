@@ -140,7 +140,9 @@ VOICE_LANGUAGE_MAP = {
 # it costs no VRAM; weights in data/eu_pt (TTS_EU_PT_MODEL, TTS_EU_PT_VOICEPACK for Ana, TTS_EU_PT_<NAME>_VOICEPACK for
 # each other voice). Four voices on one loaded model (since tts_eu_pt 0.1.32, the licence-clean model, 2026-11-01): pt_ana
 # and pt_amelia (female), pt_joao and pt_rui (male), each with its tuning from tts_eu_pt.VOICE_PRESETS. Used by /synthesize
-# (Cortex's Movie narration); the socket.io stream keeps Kokoro's own pipelines.
+# (Cortex's Movie narration) and, since 2026-11-01, the socket.io stream too (the Assistants' spoken replies were Kokoro's
+# Brazilian pf_dora: the stream knew no European voice). On the GPU when it speaks, sharing the card with Kokoro's model by
+# turns (_gpu_use): measured 2026-11-01, 0.06-0.48 s for 3-11 s of audio on the GPU against 0.45-1.57 s on the CPU, 450 MiB.
 EU_PT_VOICES = {"pt_ana": ("ana", "Ana", "F"), "pt_joao": ("joao", "João", "M"),
                 "pt_amelia": ("amelia", "Amélia", "F"), "pt_rui": ("rui", "Rui", "M")}
 _eu_pt = {}
@@ -159,7 +161,8 @@ def _eu_pt_tts(voice: str = "pt_ana"):
                 pack = os.environ.get(f"TTS_EU_PT_{key.upper()}_VOICEPACK")
                 if key != "ana" and pack:
                     _eu_pt[key] = ana.with_voice(pack, **VOICE_PRESETS[key])
-            logger.info(f"🇵🇹 tts_eu_pt (pt-PT, CPU) ready in {time.time() - t0:.1f}s: {sorted(_eu_pt)}")
+            logger.info(f"🇵🇹 tts_eu_pt (pt-PT) loaded in host memory in {time.time() - t0:.1f}s: {sorted(_eu_pt)} - "
+                        f"moved to the GPU when it speaks (_gpu_use)")
         key = EU_PT_VOICES[voice][0]
         if key not in _eu_pt:
             raise ImportError(f"voice {voice} is not configured (TTS_EU_PT_{key.upper()}_VOICEPACK)")
@@ -378,7 +381,9 @@ def get_pipeline_for_voice(voice: str) -> Optional[KPipeline]:
     return pipeline
 
 def get_language_for_voice(voice: str) -> str:
-    """Get language code for a given voice"""
+    """Get language code for a given voice (the European Portuguese voices: Kokoro's Portuguese code)"""
+    if voice in EU_PT_VOICES:
+        return 'p'
     return VOICE_LANGUAGE_MAP.get(voice, 'a')
 
 def is_voice_enabled(voice: str) -> bool:
@@ -392,7 +397,11 @@ def is_voice_enabled(voice: str) -> bool:
 # waits in host memory (measured 2026-10-16: back in 0.32 s); a synthesis that arrives meanwhile brings it back first
 # and is served, never refused. A release waits for the syntheses in flight and is a lease: when it lapses the model
 # comes back by itself, so a caller that died cannot leave it away.
-_gpu = {"state": "loaded", "active": 0, "releasing": False, "lease": {"until": None, "reason": "", "by": ""}}
+_gpu = {"state": "loaded", "active": 0, "releasing": False, "lease": {"until": None, "reason": "", "by": ""},
+        # one engine on the GPU at a time (the user, 2026-11-01): Kokoro's shared model for every language but European
+        # Portuguese, tts_eu_pt's for that; the other waits in host memory and comes back in a fraction of a second
+        "engines": {"kokoro": "cuda" if torch.cuda.is_available() else "cpu", "eu_pt": "cpu"},
+        "by_engine": {"kokoro": 0, "eu_pt": 0}, "last": "kokoro"}
 _gpu_cond: Optional[asyncio.Condition] = None
 
 
@@ -419,42 +428,131 @@ def _model_to(device: str) -> float:
     return time.time() - t
 
 
+def _stray_weights_to_cpu(model) -> None:
+    """weight_norm keeps each layer's computed weight as a plain attribute, which .to() leaves on the GPU."""
+    for m in model.modules():
+        w = m.__dict__.get("weight")
+        if torch.is_tensor(w) and "weight" not in m._parameters and w.device.type != "cpu":
+            m.__dict__["weight"] = w.to("cpu")
+
+
+def _engine_to(engine: str, device: str) -> float:
+    """One engine's model (and, for tts_eu_pt, its voicepacks) to `device`."""
+    if engine == "kokoro":
+        return _model_to(device)
+    t = time.time()
+    if _eu_pt:
+        voices = list(_eu_pt.values())
+        km = voices[0].km                                   # shared by every voice made with with_voice
+        km.to(device)
+        if device == "cpu":
+            _stray_weights_to_cpu(km)
+        for v in voices:
+            v.device = device
+            v.pack = v.pack.to(device)
+        if device == "cpu":
+            gc.collect()
+            torch.cuda.empty_cache()
+    return time.time() - t
+
+
 @asynccontextmanager
-async def _gpu_use():
-    """Around one synthesis: waits out a release in progress, brings a released model back, counts itself."""
+async def _gpu_use(engine: str = "kokoro"):
+    """Around one synthesis: waits out a release in progress; puts its engine on the GPU, the other engine first moved
+    to host memory once no synthesis of it is running; counts itself."""
     cond = _cond()
+    loop = asyncio.get_event_loop()
+    if engine == "eu_pt" and not _eu_pt:
+        await loop.run_in_executor(None, _eu_pt_tts, "pt_ana")         # loaded once, in host memory
     async with cond:
         await cond.wait_for(lambda: not _gpu["releasing"])
-        if _gpu["state"] == "released":
-            dt = await asyncio.get_event_loop().run_in_executor(None, _model_to, "cuda")
+        if torch.cuda.is_available() and _gpu["engines"][engine] != "cuda":
+            other = "eu_pt" if engine == "kokoro" else "kokoro"
+            await cond.wait_for(lambda: _gpu["by_engine"][other] == 0 and not _gpu["releasing"])
+            t = time.time()
+            if _gpu["engines"][other] == "cuda":
+                await loop.run_in_executor(None, _engine_to, other, "cpu")
+                _gpu["engines"][other] = "cpu"
+            await loop.run_in_executor(None, _engine_to, engine, "cuda")
+            _gpu["engines"][engine] = "cuda"
+            was = _gpu["state"]
             _gpu["state"] = "loaded"
-            logger.info(f"🎛️ GPU: model back on the GPU for a request ({dt:.2f} s); lease of "
-                        f"{_gpu['lease']['by'] or '?'} still open until it is renewed or lapses")
+            logger.info(f"🎛️ GPU: {engine} on the GPU, {other} in host memory ({time.time() - t:.2f} s)"
+                        + (f"; lease of {_gpu['lease']['by'] or '?'} still open until it is renewed or lapses"
+                           if was == "released" else ""))
+        _gpu["by_engine"][engine] += 1
         _gpu["active"] += 1
+        _gpu["last"] = engine
     try:
         yield
     finally:
         async with cond:
+            _gpu["by_engine"][engine] -= 1
             _gpu["active"] -= 1
             cond.notify_all()
 
 
 async def generate_tts_binary(sentence: str, voice: str, speed: float, client_id: str):
-    async with _gpu_use():
-        async for item in _generate_tts_binary(sentence, voice, speed, client_id):
+    engine = "eu_pt" if voice in EU_PT_VOICES else "kokoro"
+    async with _gpu_use(engine):
+        gen = _generate_eu_pt(sentence, voice, speed, client_id, "binary") if engine == "eu_pt" \
+            else _generate_tts_binary(sentence, voice, speed, client_id)
+        async for item in gen:
             yield item
 
 
 async def generate_tts_base64(sentence: str, voice: str, speed: float, client_id: str) -> AsyncGenerator[dict, None]:
-    async with _gpu_use():
-        async for item in _generate_tts_base64(sentence, voice, speed, client_id):
+    engine = "eu_pt" if voice in EU_PT_VOICES else "kokoro"
+    async with _gpu_use(engine):
+        gen = _generate_eu_pt(sentence, voice, speed, client_id, "base64") if engine == "eu_pt" \
+            else _generate_tts_base64(sentence, voice, speed, client_id)
+        async for item in gen:
             yield item
+
+
+async def _generate_eu_pt(sentence: str, voice: str, speed: float, client_id: str, fmt: str):
+    """One sentence in a European Portuguese voice, as the stream's chunks: (metadata, wav) for binary, a dict with
+    audio_data for base64 - the same fields as Kokoro's, one chunk per sentence (tts_eu_pt says a sentence whole)."""
+    max_length = tts_settings.get('max_sentence_length', 500) if tts_settings else 500
+    sentence = sentence.strip()
+    if len(sentence) > max_length:
+        sentence = sentence[:max_length] + "..."
+    speed = validate_speed(speed)
+    base = {'client_id': client_id, 'voice': voice, 'language': 'pt-PT', 'speed': speed, 'format': fmt}
+    binary = fmt == "binary"
+    loop = asyncio.get_event_loop()
+    timeout = tts_settings.get('generation_timeout', 25.0) if tts_settings else 25.0
+    t0 = time.time()
+    try:
+        audio = await asyncio.wait_for(loop.run_in_executor(None, lambda: _eu_pt_tts(voice).say(sentence, speed=speed)),
+                                       timeout=timeout)
+        audio = np.asarray(audio, dtype=np.float32).flatten()
+    except Exception as e:  # noqa: BLE001 - said to the client as the stream's error
+        logger.error(f"TTS generation error (tts_eu_pt, {voice}): {e}")
+        err = {'type': 'tts_error', 'error': f'European Portuguese voice {voice}: {e}', 'sentence_text': sentence[:100],
+               **base, 'timestamp': datetime.now().isoformat()}
+        yield (err, None) if binary else err
+        return
+    duration = len(audio) / 24000
+    if len(audio):
+        meta = {'type': 'tts_audio_chunk', 'sentence_text': sentence[:100], 'chunk_id': 0, 'sample_rate': 24000,
+                'duration': duration, 'sentence_duration': duration, **base, 'timestamp': datetime.now().isoformat()}
+        if binary:
+            yield meta, await loop.run_in_executor(None, audio_to_wav_bytes, audio, 24000)
+        else:
+            yield {**meta, 'audio_data': await loop.run_in_executor(None, audio_to_base64, audio)}
+    logger.info(f"🎵 TTS completed (tts_eu_pt): {duration:.2f}s audio in {time.time() - t0:.3f}s wall (voice: {voice}, "
+                f"speed: {speed})")
+    done = {'type': 'tts_sentence_complete', 'sentence_text': sentence, 'total_chunks': 1 if len(audio) else 0,
+            'total_duration': duration, **base, 'timestamp': datetime.now().isoformat()}
+    yield (done, None) if binary else done
 
 
 def _gpu_state() -> dict:
     until = _gpu["lease"]["until"]
     cuda = torch.cuda.is_available()
     return {"state": _gpu["state"], "device": "cuda" if cuda else "cpu", "active": _gpu["active"],
+            "engines": dict(_gpu["engines"]),
             "lease": {**_gpu["lease"], "seconds_left": max(0, round(until - time.time())) if until else None},
             "gpu_mib": torch.cuda.memory_reserved() // 2**20 if cuda else 0}
 
@@ -472,8 +570,11 @@ async def release_gpu(reason: str, minutes: float, by: str) -> dict:
                 return {"ok": False, "error": "syntheses held the GPU for over 60 s", **_gpu_state()}
             cuda = torch.cuda.is_available()
             before = torch.cuda.memory_reserved() if cuda else 0
-            if _gpu["state"] == "loaded" and cuda:
-                await asyncio.get_event_loop().run_in_executor(None, _model_to, "cpu")
+            if cuda:
+                for engine, where in list(_gpu["engines"].items()):
+                    if where == "cuda":
+                        await asyncio.get_event_loop().run_in_executor(None, _engine_to, engine, "cpu")
+                        _gpu["engines"][engine] = "cpu"
                 _gpu["state"] = "released"
             _gpu["lease"] = {"until": time.time() + minutes * 60, "reason": str(reason)[:100], "by": str(by)[:60]}
             freed = (before - torch.cuda.memory_reserved()) // 2**20 if cuda else 0
@@ -490,9 +591,14 @@ async def load_gpu(why: str = "asked") -> dict:
     async with cond:
         await cond.wait_for(lambda: not _gpu["releasing"])
         if _gpu["state"] == "released":
-            await asyncio.get_event_loop().run_in_executor(None, _model_to, "cuda")
+            engine = _gpu["last"]                          # the engine that spoke last comes back; the other on demand
+            if engine == "eu_pt" and not _eu_pt:
+                engine = "kokoro"
+            if torch.cuda.is_available():
+                await asyncio.get_event_loop().run_in_executor(None, _engine_to, engine, "cuda")
+                _gpu["engines"][engine] = "cuda"
             _gpu["state"] = "loaded"
-            logger.info(f"🎛️ GPU: model back ({why})")
+            logger.info(f"🎛️ GPU: {engine} back ({why})")
         _gpu["lease"] = {"until": None, "reason": "", "by": ""}
     return {"ok": True, **_gpu_state()}
 
@@ -1246,7 +1352,10 @@ async def tts_configure(sid, data):
     
     if 'voice' in data:
         new_voice = data['voice']
-        if new_voice in VOICE_LANGUAGE_MAP:
+        if new_voice in EU_PT_VOICES:                       # tts_eu_pt (_generate_eu_pt)
+            session['voice'] = new_voice
+            logger.info(f"Voice set to {new_voice} (European Portuguese, tts_eu_pt)")
+        elif new_voice in VOICE_LANGUAGE_MAP:
             if is_voice_enabled(new_voice):
                 lang_code = get_language_for_voice(new_voice)
                 pipeline = get_pipeline_for_voice(new_voice)
@@ -1285,7 +1394,7 @@ async def tts_configure(sid, data):
         'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(current_voice), 'Unknown'),
         'enabled': session.get('enabled'),
         'format': session.get('format'),
-        'pipeline_available': get_pipeline_for_voice(current_voice) is not None,
+        'pipeline_available': current_voice in EU_PT_VOICES or get_pipeline_for_voice(current_voice) is not None,
         'voice_enabled': is_voice_enabled(current_voice),
         'speed_range': {
             'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
@@ -1309,7 +1418,10 @@ async def tts_configure_client(sid, data):
     
     if 'voice' in data:
         new_voice = data['voice']
-        if new_voice in VOICE_LANGUAGE_MAP:
+        if new_voice in EU_PT_VOICES:                       # tts_eu_pt (_generate_eu_pt)
+            session['voice'] = new_voice
+            logger.info(f"Voice set to {new_voice} (European Portuguese, tts_eu_pt)")
+        elif new_voice in VOICE_LANGUAGE_MAP:
             if is_voice_enabled(new_voice):
                 lang_code = get_language_for_voice(new_voice)
                 pipeline = get_pipeline_for_voice(new_voice)
@@ -1348,7 +1460,7 @@ async def tts_configure_client(sid, data):
         'language': get_language_for_voice(current_voice),
         'language_name': SUPPORTED_LANGUAGES.get(get_language_for_voice(current_voice), 'Unknown'),
         'enabled': session.get('enabled'),
-        'pipeline_available': get_pipeline_for_voice(current_voice) is not None,
+        'pipeline_available': current_voice in EU_PT_VOICES or get_pipeline_for_voice(current_voice) is not None,
         'voice_enabled': is_voice_enabled(current_voice),
         'speed_range': {
             'min': tts_settings.get('speed_min', 0.5) if tts_settings else 0.5,
@@ -1566,7 +1678,8 @@ async def synthesize(request: Request):
     if voice in EU_PT_VOICES:
         loop = asyncio.get_running_loop()
         try:
-            audio_np = await loop.run_in_executor(None, lambda: _eu_pt_tts(voice).say(text, speed=speed))
+            async with _gpu_use("eu_pt"):
+                audio_np = await loop.run_in_executor(None, lambda: _eu_pt_tts(voice).say(text, speed=speed))
         except ImportError as e:
             raise HTTPException(status_code=503, detail=f"the European Portuguese voice is not installed: {e}")
         audio_np = np.asarray(audio_np, dtype=np.float32).flatten()
@@ -1584,7 +1697,7 @@ async def synthesize(request: Request):
             raise HTTPException(status_code=503, detail=f"no pipeline for voice {voice}")
     loop = asyncio.get_running_loop()
     parts: list[np.ndarray] = []
-    async with _gpu_use():
+    async with _gpu_use("kokoro"):
         generator = await loop.run_in_executor(None, lambda: pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+"))
         for chunk_data in generator:
             audio = getattr(getattr(chunk_data, "output", None), "audio", None)
@@ -1684,10 +1797,10 @@ async def get_voices():
             'enabled': voice_enabled
         })
     
-    for voice, (_, name, gender) in EU_PT_VOICES.items():          # /synthesize only, not the socket.io stream
+    for voice, (_, name, gender) in EU_PT_VOICES.items():          # /synthesize and the socket.io stream (tts_eu_pt)
         voices_with_languages.append({'voice': voice, 'name': name, 'gender': gender, 'language_code': 'pt-PT',
                                       'language_name': 'European Portuguese', 'available': True, 'enabled': True,
-                                      'endpoint': '/synthesize'})
+                                      'endpoint': '/synthesize, socket.io'})
     return {
         "voices": voices_with_languages,
         "total_voices": len(VOICE_LANGUAGE_MAP),

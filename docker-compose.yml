@@ -5,6 +5,11 @@ services:
       - full
     restart: unless-stopped  
     image: tts_server:1.0
+    # built by compose too (Cortex register #173: with no build section `docker compose build` did nothing and the image
+    # came only from tts_server.sh); its FROM, tts_server-server:1.0, is built by tts_server.server.sh
+    build:
+      context: .
+      dockerfile: tts_server.Dockerfile
     container_name: tts_server
     hostname: tts_server
     environment:
