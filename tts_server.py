@@ -22,6 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 import gc
 import hmac
 import os
+import sys
 import socketio
 from kokoro import KPipeline, KModel
 import torch
@@ -51,12 +52,19 @@ tts_settings = None
 _shared_kmodel: Optional[KModel] = None
 _kmodel_lock = threading.Lock()
 
+# Started by a lease's release (the process re-executed itself, _reexec): the model loads in host memory and the GPU is
+# not touched - a live CUDA context alone holds ~440 MiB of the card (measured 2026-11-17, Cortex register #468), which
+# moving the model to the host could not give back. The next synthesis, /admin/load or the lapse brings it to the GPU.
+_START_UNTIL = float(os.environ.pop("TTS_LEASE_UNTIL", "0") or 0)
+_START_RELEASED = _START_UNTIL > time.time()
+_START_LEASE = {"until": _START_UNTIL, "reason": os.environ.pop("TTS_LEASE_REASON", ""), "by": os.environ.pop("TTS_LEASE_BY", "")}
+
 def _get_shared_kmodel() -> KModel:
     global _shared_kmodel
     if _shared_kmodel is None:
         with _kmodel_lock:
             if _shared_kmodel is None:
-                dev = "cuda" if torch.cuda.is_available() else "cpu"
+                dev = "cuda" if torch.cuda.is_available() and not _START_RELEASED else "cpu"
                 _shared_kmodel = KModel().to(dev).eval()
                 logger.info(f"✅ Loaded shared Kokoro KModel on {dev}")
     return _shared_kmodel
@@ -397,10 +405,11 @@ def is_voice_enabled(voice: str) -> bool:
 # waits in host memory (measured 2026-10-16: back in 0.32 s); a synthesis that arrives meanwhile brings it back first
 # and is served, never refused. A release waits for the syntheses in flight and is a lease: when it lapses the model
 # comes back by itself, so a caller that died cannot leave it away.
-_gpu = {"state": "loaded", "active": 0, "releasing": False, "lease": {"until": None, "reason": "", "by": ""},
+_gpu = {"state": "released" if _START_RELEASED else "loaded", "active": 0, "releasing": False,
+        "lease": dict(_START_LEASE) if _START_RELEASED else {"until": None, "reason": "", "by": ""},
         # one engine on the GPU at a time (the user, 2026-11-01): Kokoro's shared model for every language but European
         # Portuguese, tts_eu_pt's for that; the other waits in host memory and comes back in a fraction of a second
-        "engines": {"kokoro": "cuda" if torch.cuda.is_available() else "cpu", "eu_pt": "cpu"},
+        "engines": {"kokoro": "cuda" if torch.cuda.is_available() and not _START_RELEASED else "cpu", "eu_pt": "cpu"},
         "by_engine": {"kokoro": 0, "eu_pt": 0}, "last": "kokoro"}
 _gpu_cond: Optional[asyncio.Condition] = None
 
@@ -557,12 +566,23 @@ def _gpu_state() -> dict:
             "gpu_mib": torch.cuda.memory_reserved() // 2**20 if cuda else 0}
 
 
+def _reexec() -> None:
+    """The process started again in its place (same pid, same command), the lease in its environment: it comes up with
+    the model in host memory and no context on the card. Syntheses wait meanwhile (_gpu["releasing"] stays set)."""
+    logger.info("🎛️ GPU lease: the process starts again without the GPU")
+    os.execv(sys.executable, list(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv]))
+
+
 async def release_gpu(reason: str, minutes: float, by: str) -> dict:
+    """The models off the card for `minutes` (1-120); again = the lease renewed. With a context open on the card the
+    process starts again without one (_reexec): moving the models to host memory gave back their memory but not the
+    context's ~440 MiB (Cortex register #468); otherwise the models go to host memory."""
     minutes = max(1.0, min(120.0, float(minutes or 10)))
     cond = _cond()
     async with cond:
         await cond.wait_for(lambda: not _gpu["releasing"])
         _gpu["releasing"] = True
+        restart = False
         try:
             try:
                 await asyncio.wait_for(cond.wait_for(lambda: _gpu["active"] == 0), timeout=60)
@@ -570,6 +590,16 @@ async def release_gpu(reason: str, minutes: float, by: str) -> dict:
                 return {"ok": False, "error": "syntheses held the GPU for over 60 s", **_gpu_state()}
             cuda = torch.cuda.is_available()
             before = torch.cuda.memory_reserved() if cuda else 0
+            if cuda and torch.cuda.is_initialized():
+                restart = True
+                until = time.time() + minutes * 60
+                os.environ.update(TTS_LEASE_UNTIL=str(until), TTS_LEASE_REASON=str(reason)[:100], TTS_LEASE_BY=str(by)[:60])
+                _gpu["state"] = "released"
+                _gpu["lease"] = {"until": until, "reason": str(reason)[:100], "by": str(by)[:60]}
+                asyncio.get_running_loop().call_later(0.5, _reexec)     # after this answer has gone out
+                logger.info(f"🎛️ GPU released for {_gpu['lease']['by'] or '?'} ({_gpu['lease']['reason'] or 'no reason'}), "
+                            f"{minutes:g} min: {before // 2**20} MiB and the context given back, the process starts again")
+                return {"ok": True, "freed_mib": before // 2**20, "restarting": True, **_gpu_state()}
             if cuda:
                 for engine, where in list(_gpu["engines"].items()):
                     if where == "cuda":
@@ -579,7 +609,8 @@ async def release_gpu(reason: str, minutes: float, by: str) -> dict:
             _gpu["lease"] = {"until": time.time() + minutes * 60, "reason": str(reason)[:100], "by": str(by)[:60]}
             freed = (before - torch.cuda.memory_reserved()) // 2**20 if cuda else 0
         finally:
-            _gpu["releasing"] = False
+            if not restart:                    # restarting: syntheses wait until the process is gone
+                _gpu["releasing"] = False
             cond.notify_all()
     logger.info(f"🎛️ GPU released for {_gpu['lease']['by'] or '?'} ({_gpu['lease']['reason'] or 'no reason'}), "
                 f"{minutes:g} min, freed {freed} MiB")
